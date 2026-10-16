@@ -1,0 +1,46 @@
+# Builds and tests on every push and pull request, and keeps the APKs as a download.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # Also validates gradle-wrapper.jar against Gradle's published checksums.
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Unit tests (RTSP core)
+        run: ./gradlew :core:rtsp:test --stacktrace
+
+      - name: Build APKs and the camcheck tool
+        run: ./gradlew :app:assembleDebug :app:assemblePerf :tools:camcheck:installDist --stacktrace
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tv-rtsp-player-phase0
+          path: |
+            app/build/outputs/apk/**/*.apk
+            tools/camcheck/build/install/camcheck/**
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: test-reports
+          path: core/rtsp/build/reports/tests/

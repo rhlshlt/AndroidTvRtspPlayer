@@ -1,0 +1,34 @@
+# Versions checked in October 2026 against the AndroidX release pages and the rtsp-client-android
+# 6.1.1 build (AGP 9.4.1, Gradle 9.7.1, Kotlin 2.4.20, compileSdk 37). See docs/PHASE0_GUIDE.md.
+[versions]
+agp = "9.4.1"
+kotlin = "2.4.20"
+coroutines = "1.10.2"
+composeBom = "2026.09.00"
+activityCompose = "1.13.0"
+tvMaterial = "1.1.0"
+media3 = "1.11.1"
+rtspClientAndroid = "6.1.1"
+androidxAnnotation = "1.10.0"
+junit = "4.13.2"
+
+[libraries]
+androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "androidxAnnotation" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-tv-material = { group = "androidx.tv", name = "tv-material", version.ref = "tvMaterial" }
+androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
+androidx-media3-exoplayer-rtsp = { group = "androidx.media3", name = "media3-exoplayer-rtsp", version.ref = "media3" }
+rtsp-client-android = { group = "com.github.alexeyvasilyev", name = "rtsp-client-android", version.ref = "rtspClientAndroid" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

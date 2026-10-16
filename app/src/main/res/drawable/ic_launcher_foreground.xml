@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 108dp adaptive-icon foreground: a TV screen with a red live dot. The safe zone is the centre 66dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFE8EAED"
+        android:pathData="M30,36h48a4,4 0,0 1,4 4v26a4,4 0,0 1,-4 4h-48a4,4 0,0 1,-4 -4v-26a4,4 0,0 1,4 -4z" />
+    <path
+        android:fillColor="#FF0F1115"
+        android:pathData="M31,40h46v25h-46z" />
+    <path
+        android:fillColor="#FFE8EAED"
+        android:pathData="M46,74h16v3h-16z" />
+    <path
+        android:fillColor="#FFEA4335"
+        android:pathData="M40,52.5m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+    <path
+        android:fillColor="#FF8AB4F8"
+        android:pathData="M52,48h20v3h-20zM52,54h14v3h-14z" />
+</vector>

@@ -1,0 +1,21 @@
+# Gradle and Android Studio
+.gradle/
+build/
+/local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Build outputs
+*.apk
+*.aab
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Phase 0 measurements pulled from TVs (may name cameras and networks); review before committing
+/results/
