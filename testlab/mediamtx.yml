@@ -1,0 +1,57 @@
+# MediaMTX configuration for the TV RTSP Player test lab (docs/TEST_LAB.md).
+# Written for MediaMTX v1.21; unknown keys make MediaMTX refuse to start, so only long-standing
+# keys are used. Anything not set here keeps MediaMTX's default.
+
+logLevel: info
+
+# Authentication: Digest only, as Tapo cameras use. These are lab-only accounts; if the lab PC is
+# reachable from other networks, change both passwords here and in the publish/app settings.
+authMethod: internal
+authInternalUsers:
+  # FFmpeg publishes the lab streams with this account (scripts/publish.*).
+  - user: publisher
+    pass: publisher-lab-pass
+    ips: []
+    permissions:
+      - action: publish
+        path:
+  # The TV app and camcheck read with this account.
+  - user: viewer
+    pass: viewer-lab-pass
+    ips: []
+    permissions:
+      - action: read
+        path:
+
+rtsp: true
+# TCP first in the list is irrelevant: the client chooses. The app defaults to TCP.
+rtspTransports: [udp, tcp]
+rtspEncryption: "no"
+rtspAddress: :8554
+rtpAddress: :8000
+rtcpAddress: :8001
+# gortsplib then sends: Digest realm="...", nonce="...", algorithm="MD5" (both engines accept it).
+# If a client can't sign in, try [basic] to rule out Digest problems.
+rtspAuthMethods: [digest]
+
+# Protocols the lab doesn't need.
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+
+pathDefaults:
+  # 0 = unlimited readers, so one lab path can feed all 16 tiles of the multi-view test.
+  maxReaders: 0
+
+paths:
+  # Shaped like a C320WS: main 2560x1440 and sub 640x360, H.264 Main, 15 fps, G.711 A-law.
+  lab/stream1:
+  lab/stream2:
+  # A live clock (the lab PC's time with milliseconds) for delay checks.
+  lab/clock:
+  # The same streams with Tapo's limit of about two RTSP viewers, to test "camera busy" handling.
+  tapo/stream1:
+    maxReaders: 2
+  tapo/stream2:
+    maxReaders: 2

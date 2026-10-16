@@ -1,0 +1,14 @@
+# Runs MediaMTX with the lab configuration: docker compose up -d   (stop: docker compose down)
+# Without Docker, download MediaMTX v1.21.0 for your OS from
+# https://github.com/bluenviron/mediamtx/releases and run: mediamtx mediamtx.yml
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.0
+    container_name: tvrtsp-lab-mediamtx
+    restart: unless-stopped
+    ports:
+      - "8554:8554"       # RTSP (RTP over TCP uses this port too)
+      - "8000:8000/udp"   # RTP over UDP
+      - "8001:8001/udp"   # RTCP over UDP
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro

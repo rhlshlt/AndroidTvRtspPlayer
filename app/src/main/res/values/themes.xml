@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Platform theme: Compose draws everything, so no AppCompat or Material Components dependency. -->
+    <style name="Theme.TvRtspPlayer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:colorBackground">@color/window_background</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>
