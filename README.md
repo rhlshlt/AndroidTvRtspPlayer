@@ -14,7 +14,7 @@ follows the [implementation plan](docs/IMPLEMENTATION_PLAN.md).
 | Path | What it is |
 | --- | --- |
 | [`app`](app) | Phase 0 TV app: full-screen player with metrics and an on-screen clock, 1–16 tile capacity test, camera check, device profile, CSV results |
-| [`core/rtsp`](core/rtsp) | Pure Kotlin: RTSP URLs with safe credential handling, Digest and Basic auth, SDP and H.264 SPS/PPS parsing, camera check with live stream analysis; 80 unit tests |
+| [`core/rtsp`](core/rtsp) | Pure Kotlin: RTSP URLs with safe credential handling, Digest and Basic auth, SDP and H.264 SPS/PPS parsing, camera check with live stream analysis; 81 unit tests |
 | [`core/player`](core/player) | `StreamEngine` interface with two engines: Media3 ExoPlayer RTSP (with low-latency decoding and a latency guard) and rtsp-client-android |
 | [`core/perf`](core/perf) | Device profile (decoders, levels, instances, tier), process sampling, CSV metrics |
 | [`tools/camcheck`](tools/camcheck) | Desktop command-line camera check, built on `core/rtsp` |
@@ -67,6 +67,9 @@ the APKs from the latest GitHub Actions run on `main`. The full procedure is in 
   are scrubbed of passwords before display.
 - The adb camera hook is enabled only in debug and perf builds and only accepts broadcasts from the
   adb shell.
+- Debug and perf builds are signed with a public test key ([`app/signing`](app/signing)), so any
+  build installs over the last one. It must be replaced with a private key before Phase 1 saves
+  camera passwords.
 - The test lab's accounts are lab-only; change them if the lab PC is reachable from other networks.
 - Reach cameras over the LAN or a VPN; never port-forward RTSP.
 

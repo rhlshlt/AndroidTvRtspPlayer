@@ -36,7 +36,7 @@ Gradle 9.7.1 and checks its SHA-256 against the value pinned in
 `gradle/wrapper/gradle-wrapper.properties`. Then, from the project folder:
 
 ```powershell
-.\gradlew.bat :core:rtsp:test           # 80 unit tests, about 10 s
+.\gradlew.bat :core:rtsp:test           # 81 unit tests, about 10 s
 .\gradlew.bat :app:assemblePerf         # app\build\outputs\apk\perf\app-perf.apk
 ```
 
@@ -45,7 +45,7 @@ Build variants (Build → Select Build Variant):
 | Variant | Use it for | Notes |
 | --- | --- | --- |
 | `debug` | Development | Debuggable, StrictMode on, adb camera hook |
-| `perf` | **All Phase 0 measurements** | Not debuggable (debug builds run slower), signed with the debug key, adb camera hook |
+| `perf` | **All Phase 0 measurements** | Not debuggable (debug builds run slower), signed with the shared test key, adb camera hook |
 | `release` | Not used in Phase 0 | Unsigned until Phase 7 |
 
 If sync can't resolve `com.github.alexeyvasilyev:rtsp-client-android:6.1.1`, open
@@ -64,7 +64,15 @@ certutil -hashfile $HOME\Downloads\tv-rtsp-player-phase0.zip SHA256
 ```
 
 Extract it and install `app\build\outputs\apk\perf\app-perf.apk` from the extracted folder with
-`adb install -r` (step 4).
+`adb install -r` (step 4). Debug and perf builds are signed with a shared test key
+([`app/signing`](../app/signing/README.md)), so each new build installs over the last one. A build
+from before that key existed must be uninstalled once, which deletes the app's logs on the TV, so
+pull them first:
+
+```powershell
+adb pull /sdcard/Android/data/io.github.rhlshlt.tvrtsp/files/metrics D:\Projects\phase0-results-backup
+adb uninstall io.github.rhlshlt.tvrtsp
+```
 
 ## 2. Prepare the cameras
 
@@ -334,4 +342,5 @@ Record the decisions in [DECISIONS.md](DECISIONS.md) and in the plan, then start
 | One multi-view tile black while its label says playing | The display may not show every hardware-decoded video at once: compare Video view SurfaceView with TextureView |
 | "Falling behind" in orange, then "Rejoining live" | Media3's latency guard: the decoder can't keep up (often stream1 in software); use stream2 or rtsp-client-android |
 | Picture freezes, state stays playing | A stall the Phase 0 player doesn't detect yet; restart and note it for Phase 2 |
+| `INSTALL_FAILED_UPDATE_INCOMPATIBLE: ... signatures do not match` | The installed app was signed with another key (a build from before the shared test key): pull the logs, `adb uninstall io.github.rhlshlt.tvrtsp`, then install again |
 | The app isn't in the Apps row | It installed on another device: `adb devices`, then `-s <device>` |

@@ -25,19 +25,22 @@ reference TVs and the night-time checks are still to do. Cells marked "to fill" 
 
 ## Camera checks (`camcheck`)
 
-One row per camera and stream; "Engines" is the Authentication section's verdicts. Checked in
-daylight from a PC, 60 s per stream.
+One row per camera and stream; "Engines" is the Authentication section's verdicts. The
+192.168.1.101 camera was checked in daylight from a PC (60 s per stream); Front door at night
+(20:00) from the TV's own camera check (15 s per stream).
 
 | Camera | Stream | Result | Engines (Media3 / rtsp-client) | Keyframe interval (s) | B-frames | fps | Video kbit/s day | Video kbit/s night | First keyframe after PLAY (ms) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 192.168.1.101 | stream1 | OK | OK / OK | 2.00 | 0 in 899 frames | 15.0 | 1,481 | – | 62 |
 | 192.168.1.101 | stream2 | OK | OK / OK | 2.00 | 0 in 900 frames | 15.0 | 125 | – | 55 |
+| Front door | stream1 | OK | OK / OK | 2.00 | 0 in 224 frames | 15.0 | – | 1,085 | 123 |
+| Front door | stream2 | OK | OK / OK | 2.00 | 0 in 225 frames | 15.0 | – | 144 | 52 |
 
 - Sign-in: Digest with MD5, realm "TP-Link IP-Camera", no qop.
-- Largest arrival jitter: 496 ms on stream1 and 552 ms on stream2, which points to Wi-Fi rather
-  than bandwidth.
-- Full SDP captured (`--sdp`): yes; an `a=control` line per track and two `sprop-parameter-sets`
-  entries, as Media3 needs. Not yet added to the `core/rtsp` tests.
+- Largest arrival jitter: 496 ms on stream1 and 552 ms on stream2 from the PC, which points to
+  Wi-Fi rather than bandwidth; from the TV, 168 ms and 62 ms.
+- Full SDP captured: yes; one video and one audio track, an `a=control` line per track and two
+  `sprop-parameter-sets` entries, as Media3 needs. The stream2 answer is now a `core/rtsp` test.
 - Third viewer (`--parallel 3`) gets: – (four tiles on two cameras, two sessions each, all played)
 - Special characters in the password: –
 
@@ -93,10 +96,13 @@ lab isn't set up yet; these rows are from the two real cameras, two sessions eac
 | | Media3 | sub | 16 | | | | | |
 | | Media3 | main | 4 | | | | | |
 
-Only one hardware-decoded tile showed at a time; software-decoded tiles always showed. An evening
-2-tile run played only one tile, and the label bug hid the other's error. During it, `top` showed the
-whole TV at about a third of its CPU: the app 58–68% of one core, SurfaceFlinger 28%, the TV's own
-service 21%, decoding 10–20%.
+Only one hardware-decoded tile showed at a time; software-decoded tiles always showed. In the
+evening 2-tile runs only one of the two hardware decoder instances was free, so the right tile played
+in software; the left tile got the hardware decoder but rendered no frame in 12 minutes, while the
+same camera played in software in a 4-tile run. Something outside the test held the other instance,
+possibly a decoder left over from the 11-hour player session (see Other checks). During one of
+these runs, `top` showed the whole TV at about a third of its CPU: the app 58–68% of one core,
+SurfaceFlinger 28%, the TV's own service 21%, decoding 10–20%.
 
 App CPU counts the app's own process only, as a share of one of the TV's 4 cores; decoding runs in
 Android's media processes, so the total load needs `adb shell top`. With nothing playing, the app
@@ -115,6 +121,7 @@ Largest smooth layout per TV:
 | --- | --- |
 | Media3 when the decoder can't keep up (stream1 in software) | Stalled at 0 fps and stored 617 s of video in 12 minutes; Java heap grew from 10 to 129 MB, against a 192 MB limit. The latency guard now restarts the player |
 | Camera over the internet (port forward) | Plays on both engines; first frame 1.0–1.3 s with Media3 |
+| 11 hours on one stream (rtsp-client-android, SPS rewrite, Front door stream2) | 14.9 fps in every hour; 53 of 39,858 one-second samples under 10 fps; no errors or reconnects; Java heap flat at about 7 MB, PSS 34–52 MB; thermal 0 |
 | Camera unplugged 10 s: what each engine shows, time to error | – |
 | Camera unplugged 2 min | – |
 | TCP vs UDP on Wi-Fi | – |

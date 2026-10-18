@@ -20,6 +20,18 @@ android {
         manifestPlaceholders["adbHookEnabled"] = "false"
     }
 
+    signingConfigs {
+        // A shared, public test key (app/signing/README.md), so builds from any GitHub Actions run
+        // or PC install over each other; each runner would otherwise make its own debug key.
+        // Replace it with a private key before Phase 1 saves camera passwords (DECISIONS.md P0-20).
+        getByName("debug") {
+            storeFile = file("signing/phase0-test.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["adbHookEnabled"] = "true"
@@ -27,8 +39,8 @@ android {
         release {
             isMinifyEnabled = false // R8 and a private signing key come in Phase 7
         }
-        // Non-debuggable build for CPU and latency measurements, signed with the debug key and
-        // with the adb test hook. Select it in Build > Select Build Variant.
+        // Non-debuggable build for CPU and latency measurements, signed with the shared test key
+        // and with the adb test hook. Select it in Build > Select Build Variant.
         create("perf") {
             initWith(getByName("release"))
             isDebuggable = false

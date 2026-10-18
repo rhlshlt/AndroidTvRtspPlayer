@@ -1,6 +1,6 @@
 # Android TV RTSP Player — Implementation Plan
 
-> Exported from the plan's Claude Doc on 2026-10-18 (revision 127). The [live document](https://claude.ai/code/artifact/b64189f7-8fc3-49f6-8f9a-e5f4b7d19196) is the source of truth; diagrams are redrawn here as Mermaid and text.
+> Exported from the plan's Claude Doc on 2026-10-18 (revision 130). The [live document](https://claude.ai/code/artifact/b64189f7-8fc3-49f6-8f9a-e5f4b7d19196) is the source of truth; diagrams are redrawn here as Mermaid and text.
 
 Oct 15, 2026 · @rohit
 
@@ -38,6 +38,7 @@ Found while building:
 - Media3 gets low-latency decoding through a wrapped codec adapter factory; requirement 7 now says so.
 - Android 17 makes local-network access a runtime permission for apps targeting API 37. The app stays on targetSdk 36, where access is granted implicitly, until that prompt is built.
 - rtsp-client-android ships a class based on Moonlight's `MediaCodecHelper`, and Moonlight is GPL-3.0. That's fine for private installs; review it before any wider distribution.
+- Each GitHub Actions run signed the APKs with a new random debug key, so a new build couldn't update the installed app. Debug and perf builds now share a public test key in the repository; Phase 1 must switch to a private key before it saves camera passwords, because an app signed with the public key could replace this one and read its data.
 
 First camera check, Oct 16 (one C320WS in daylight, `camcheck` from a PC, 60 s per stream):
 
@@ -88,6 +89,12 @@ SPS rewrite and multi-view on the same TV, Oct 18 (stream2 unless noted):
 - App CPU covers only the app's own process, as a share of one of the 4 cores; decoding runs in Android's media service. It was about 48% with nothing playing, mostly the clock redrawn every frame, plus about 15% per stream and 10% per extra tile. The total load needs `adb shell top`.
 - Left for 12 minutes, Media3 on stream1 stalled at 0 fps and stored 617 s of video. Its Java heap grew from 10 to 129 MB, about 10 MB a minute, against a 192 MB limit, so the latency guard must restart the player long before memory runs out.
 - The next build accepts camera addresses with a port, reports low-latency decoding truthfully, redraws the clock 10 times a second, adds Media3's latency guard, fixes the multi-view labels, and adds TextureView and software-decoder switches.
+
+Long run and evening checks, Oct 18:
+
+- rtsp-client-android with SPS rewrite played the Front door's stream2 for about 11 hours, with one short break to switch streams: 14.9 fps in every hour (53 of 39,858 one-second samples under 10 fps), no errors or reconnects, Java heap flat at about 7 MB, PSS 34–52 MB, no thermal throttling.
+- The camera check on the TV at night (Front door, 20:00): stream1 1,085 kbit/s and stream2 144 kbit/s, keyframes every 2.00 s, no B-frames, arrival jitter 168 and 62 ms on the TV's network. The real SDP has only a video and an audio track.
+- Evening 2-tile runs: only one of the two hardware decoder instances was free, so the right tile played on the software decoder. The left tile got the hardware decoder but rendered no frame in 12 minutes, while the same camera played on a software decoder in a 4-tile run. Something outside the test held the other instance, possibly a decoder left over from the long player session. Reinstalling the app clears anything the app held, and `adb shell dumpsys media.resource_manager` names the holder if it happens again.
 
 To reach Gate A:
 
@@ -384,7 +391,7 @@ A DataStore `Serializer<List<StreamConfig>>` calls `encrypt` in `writeTo` and `d
 4. Build `StreamRepository`: `streams: Flow<List<StreamConfig>>`, `add`, `update`, `delete`, `move`.
 5. Parse pasted URLs: split `rtsp://user:pass@host:554/path` into URL, username and password (percent-decoded). Rebuild the credentialed URI with `Uri.encode` only when a session starts, because Media3 reads RTSP credentials from the URI.
 6. Build the Streams screen (list with status dot, reorder mode, delete confirmation) and the Add/Edit form: Name, URL, Username, Password (masked), and under Advanced the sub-stream URL, transport and engine. Add a **Test connection** button that runs the probe from requirement 3.
-7. Harden: exclude `streams.bin` from backup (`dataExtractionRules` and `fullBackupContent`), redact credentials in every log, pass only IDs in navigation, enable R8.
+7. Harden: exclude `streams.bin` from backup (`dataExtractionRules` and `fullBackupContent`), redact credentials in every log, pass only IDs in navigation, enable R8, and sign every build with a private key kept out of the repository, since the Phase 0 test key is public.
 
 ### Tapo quick add
 

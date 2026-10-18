@@ -12,7 +12,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moves to a new Ubuntu release from Oct 19, 2026; move deliberately.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
