@@ -85,8 +85,9 @@ A 4K30 decoder handles about 249 Mpx/s, so the full-resolution 4-view needs roug
 
 ## Measured so far
 
-One camera checked with `camcheck` in daylight on Oct 16, 2026, and the first TV (a Panasonic with a
-Realtek decoder) on Oct 17–18; full tables in [PHASE0_RESULTS.md](PHASE0_RESULTS.md).
+One camera checked with `camcheck` in daylight on Oct 16, 2026, the Front door camera at night with
+the TV's camera check, and the first TV (a Panasonic with a Realtek decoder) on Oct 17–18; full
+tables in [PHASE0_RESULTS.md](PHASE0_RESULTS.md).
 
 | Question | Answer |
 | --- | --- |
@@ -94,8 +95,10 @@ Realtek decoder) on Oct 17–18; full tables in [PHASE0_RESULTS.md](PHASE0_RESUL
 | Keyframe interval | 2.00 s on both streams, steady |
 | B-frames | None (899 and 900 frames checked), so the SPS rewrite is safe |
 | Daytime bitrate | stream1 1,481 kbit/s (keyframes about 176 KB); stream2 125 kbit/s (about 28 KB) |
+| Night bitrate (Front door, at 20:00) | stream1 1,085 kbit/s (keyframes about 211 KB); stream2 144 kbit/s (about 31 KB) |
+| Full SDP | One video and one audio track, `a=control` per track, two parameter sets; stream2's answer is a unit test |
 | First keyframe after PLAY | 62 ms (stream1) and 55 ms (stream2): switching needn't wait for the next keyframe |
-| Arrival jitter on Wi-Fi | Up to 496 ms (stream1) and 552 ms (stream2) |
+| Arrival jitter on Wi-Fi | Up to 496 ms (stream1) and 552 ms (stream2) at the PC; 168 and 62 ms at the TV |
 | Decoder hold on the Realtek TV, stream2 | About 600 ms as sent; 259–273 ms with rtsp-client-android's SPS rewrite |
 | stream1 on the Realtek TV | Software decoding only: 13–15 fps with rtsp-client-android, 4–7 fps with Media3 |
 | Two viewers per camera | Worked: four tiles on two cameras, two sessions each |
@@ -106,9 +109,8 @@ Each item has its command in [PHASE0_GUIDE.md](PHASE0_GUIDE.md).
 
 | Question | How | Recorded in |
 | --- | --- | --- |
-| Bitrate of both streams at night (infrared) | `camcheck --tapo <ip> --user <account> --seconds 60` at night | Camera checks |
-| The other cameras' keyframe interval, B-frames and sign-in | same, once per camera | Camera checks |
-| Full SDP in the unit tests | paste the `camcheck ... --sdp` output into `SdpTest` | Camera checks |
+| Day and night bitrate of the same camera | `camcheck --tapo <ip> --user <account> --seconds 60` by day and at night | Camera checks |
+| The Outdoor door camera's keyframe interval, B-frames and sign-in | same | Camera checks |
 | What a third RTSP viewer gets (error code or refused connection) | `camcheck ... --parallel 3` while nothing else watches | Viewer limit |
 | Whether special characters in the Camera Account password work | a second camera account with symbols | Camera checks |
 | How long the other TVs' decoders hold frames | the player's delay test, low-latency decoding on and off | Delay |

@@ -168,7 +168,9 @@ class RtspClientEngine : StreamEngine {
             lowLatencyDecoding = if (decoder != null) false else null,
             decoderLowLatencySupported = DecoderFeatures.lowLatencySupported(decoder),
             framesReceived = framesReceived.get(),
-            networkLatencyMs = s?.networkLatencyMsec?.takeIf { it >= 0 },
+            // The library compares RTP time stamps with this TV's clock, so a camera whose clock
+            // differs gives days-long values (seen on the first TV); keep only plausible ones.
+            networkLatencyMs = s?.networkLatencyMsec?.takeIf { it in 0..MAX_PLAUSIBLE_LATENCY_MS },
             decoderLatencyMs = s?.videoDecoderLatencyMsec?.takeIf { it >= 0 },
             firstFrameMs = firstFrameMs,
             errors = errors,
@@ -211,6 +213,7 @@ class RtspClientEngine : StreamEngine {
 
     private companion object {
         const val RESTART_GAP_MS = 500L
+        const val MAX_PLAUSIBLE_LATENCY_MS = 60_000
     }
 
     private val dataListener = object : RtspDataListener {

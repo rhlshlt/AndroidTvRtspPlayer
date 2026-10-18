@@ -11,8 +11,9 @@ import java.util.Base64
 class SdpTest {
 
     /**
-     * Built around the C320WS stream1 fmtp line captured from the user's camera. The other lines are
-     * typical of Tapo answers but were NOT captured; replace this with a real capture in Phase 0.
+     * Built before a real capture existed: the C320WS stream1 fmtp line is real, and the extra lines
+     * (a smart_encoder attribute, an application track) check that the parser skips what it doesn't
+     * use. The real answer is [c320wsStream2].
      */
     private val tapoLike = """
         v=0
@@ -54,6 +55,50 @@ class SdpTest {
         assertEquals("PCMA", audio.encoding)
         assertEquals(8000, audio.rtpMap!!.clockRate)
         assertEquals("track2", audio.control)
+    }
+
+    /**
+     * The C320WS stream2 answer as the TV's camera check captured it on Oct 18, 2026 (firmware as
+     * shipped; only the address is changed to the docs' example).
+     */
+    private val c320wsStream2 = """
+        v=0
+        o=- 14665860 31787219 1 IN IP4 192.168.1.20
+        s=Session streamed by "TP-Link RTSP Server"
+        t=0 0
+        m=video 0 RTP/AVP 96
+        c=IN IP4 0.0.0.0
+        b=AS:4096
+        a=range:npt=0-
+        a=control:track1
+        a=rtpmap:96 H264/90000
+        a=fmtp:96 packetization-mode=1; profile-level-id=4D0016; sprop-parameter-sets=Z00AFoqKUFAX/LNkAAAPoAAB1MAQ,aO48gA==
+        m=audio 0 RTP/AVP 8
+        a=rtpmap:8 PCMA/8000
+        a=control:track2
+    """.trimIndent().replace("\n", "\r\n")
+
+    @Test
+    fun parsesRealC320wsAnswer() {
+        val sdp = SessionDescription.parse(c320wsStream2)
+        assertEquals("Session streamed by \"TP-Link RTSP Server\"", sdp.sessionName)
+        assertEquals(2, sdp.media.size)
+        val video = sdp.video!!
+        assertEquals("track1", video.control)
+        assertEquals("H264", video.encoding)
+        assertEquals(4096, video.bandwidth["AS"])
+        assertEquals("npt=0-", video.attribute("range"))
+        assertEquals("track2", sdp.audio!!.control)
+        assertEquals("PCMA", sdp.audio!!.encoding)
+        // What Media3 needs: exactly two parameter sets, SPS first.
+        val info = H264SdpInfo.from(video)!!
+        assertTrue(info.hasSpsAndPps)
+        assertEquals(1, info.ppsList.size)
+        assertEquals(77, info.profileIdc)
+        assertEquals(22, info.levelIdc)
+        val sps = H264Sps.parse(info.sps!!)
+        assertEquals(640, sps.width)
+        assertEquals(360, sps.height)
     }
 
     @Test
