@@ -1,6 +1,6 @@
 # Android TV RTSP Player — Implementation Plan
 
-> Exported from the plan's Claude Doc on 2026-10-18 (revision 124). The [live document](https://claude.ai/code/artifact/b64189f7-8fc3-49f6-8f9a-e5f4b7d19196) is the source of truth; diagrams are redrawn here as Mermaid and text.
+> Exported from the plan's Claude Doc on 2026-10-18 (revision 127). The [live document](https://claude.ai/code/artifact/b64189f7-8fc3-49f6-8f9a-e5f4b7d19196) is the source of truth; diagrams are redrawn here as Mermaid and text.
 
 Oct 15, 2026 · @rohit
 
@@ -82,12 +82,12 @@ First TV, Oct 18: Panasonic 32-inch (model SCBC ATV R1), Android 11, Realtek har
 SPS rewrite and multi-view on the same TV, Oct 18 (stream2 unless noted):
 
 - rtsp-client-android with SPS rewrite: the Realtek decoder's delay fell from 589 to 259–273 ms, the first frame came in 584 ms, and the picture was under 1 s behind live, the lowest so far. Outdoor door over the internet: first frame 686 ms, decoder 274 ms.
-- 2 tiles with Media3: both on the Realtek decoder at 15 fps each, with no dropped frames in runs of up to 161 s.
-- 4 tiles: 2 Realtek and 2 software decoders, 15 fps each, no dropped frames and no thermal throttling. One Realtek tile stayed black while decoding 15 fps, so this TV may not display every hardware-decoded tile at once; the next build tests TextureView tiles.
+- 2 tiles with Media3: both on the Realtek decoder at 15 fps each, with no dropped frames in runs of up to 161 s, but only one of the two showed on screen. An evening run started only one of the two tiles; the label bug hid the other tile's error.
+- 4 tiles: 2 Realtek and 2 software decoders, 15 fps each, no dropped frames and no thermal throttling. One Realtek tile stayed black while decoding 15 fps, as in the 2-tile run: this TV shows only one hardware-decoded SurfaceView video at a time. The next build tests TextureView tiles, and a software decoder for every tile but one.
 - Tile labels drawn before the last video disappeared; the next build draws labels after all videos.
 - App CPU covers only the app's own process, as a share of one of the 4 cores; decoding runs in Android's media service. It was about 48% with nothing playing, mostly the clock redrawn every frame, plus about 15% per stream and 10% per extra tile. The total load needs `adb shell top`.
 - Left for 12 minutes, Media3 on stream1 stalled at 0 fps and stored 617 s of video. Its Java heap grew from 10 to 129 MB, about 10 MB a minute, against a 192 MB limit, so the latency guard must restart the player long before memory runs out.
-- The next build accepts camera addresses with a port, reports low-latency decoding truthfully, redraws the clock 10 times a second, adds Media3's latency guard and fixes the multi-view labels.
+- The next build accepts camera addresses with a port, reports low-latency decoding truthfully, redraws the clock 10 times a second, adds Media3's latency guard, fixes the multi-view labels, and adds TextureView and software-decoder switches.
 
 To reach Gate A:
 

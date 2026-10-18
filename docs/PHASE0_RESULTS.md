@@ -88,10 +88,15 @@ lab isn't set up yet; these rows are from the two real cameras, two sessions eac
 
 | TV | Engine | Stream | Tiles tried | Tiles playing | Total fps (target 15 × tiles) | Dropped/s | App CPU % | Smooth? |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Panasonic | Media3 | sub | 2 | 2, both hardware | 29.9 | 0 | 70–75 | Yes (runs up to 161 s) |
+| Panasonic | Media3 | sub | 2 | 2, both hardware | 29.9 | 0 | 70–75 | Frame rate yes (runs up to 161 s), but only one tile showed |
 | Panasonic | Media3 | sub | 4 | 4: 2 hardware, 2 software | 59.6 | 0 | 94 | Frame rate yes, but one hardware tile showed black |
 | | Media3 | sub | 16 | | | | | |
 | | Media3 | main | 4 | | | | | |
+
+Only one hardware-decoded tile showed at a time; software-decoded tiles always showed. An evening
+2-tile run played only one tile, and the label bug hid the other's error. During it, `top` showed the
+whole TV at about a third of its CPU: the app 58–68% of one core, SurfaceFlinger 28%, the TV's own
+service 21%, decoding 10–20%.
 
 App CPU counts the app's own process only, as a share of one of the TV's 4 cores; decoding runs in
 Android's media processes, so the total load needs `adb shell top`. With nothing playing, the app
@@ -102,7 +107,7 @@ Largest smooth layout per TV:
 
 | TV | Sub-streams (max tiles) | Main streams (max tiles) | Tier to use |
 | --- | --- | --- | --- |
-| Panasonic | 2 in hardware; 4 pending the black-tile test | None in hardware | LOW |
+| Panasonic | 1 visible in hardware; more pending the TextureView and software-decoder tests | None in hardware | LOW |
 
 ## Other checks
 

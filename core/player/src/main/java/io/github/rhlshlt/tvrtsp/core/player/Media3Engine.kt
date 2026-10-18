@@ -18,6 +18,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -98,6 +99,7 @@ class Media3Engine(
             lowLatencySupported = supported
             lowLatency = applied
         }.setEnableDecoderFallback(true)
+            .setMediaCodecSelector(if (request.preferSoftwareDecoder) MediaCodecSelector.PREFER_SOFTWARE else MediaCodecSelector.DEFAULT)
         val profile = request.bufferProfile
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(profile.minBufferMs, profile.maxBufferMs, profile.startMs, profile.afterRebufferMs)

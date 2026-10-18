@@ -214,7 +214,8 @@ and the time stamp at 08:16:58 means a delay between 0 and 0.9 s.
 
 Configurations: Media3 with Balanced buffering; Media3 with Low latency buffering; Media3 with
 low-latency decoding off; rtsp-client-android; rtsp-client-android with SPS rewrite (only if
-`camcheck` found no B-frames). The plan's target is under 2 s; the comparison between
+`camcheck` found no B-frames). On stream2, also try OK → **Decoder: software first** with each
+engine: Android's software decoder may hold fewer frames than the TV's. The plan's target is under 2 s; the comparison between
 configurations matters more than the absolute value, which includes the camera's own encoder delay.
 
 Media3 has a **latency guard**, on by default (OK → Latency guard). RTSP lets video pile up when the
@@ -250,12 +251,19 @@ while the test plays and keep the second of the two samples:
 adb shell top -b -n 2 -d 5 -m 15 > results\top-4tiles.txt
 ```
 
-**Black tiles.** On the first test TV, one of two hardware-decoded tiles stayed black in the 4-tile
-grid although its label said playing at 15 fps. If you see that, run the same layout twice, once with
-**Video view: SurfaceView** and once with **TextureView** (Media3 only), and photograph both.
-SurfaceView hands video to the display hardware, which may show only a limited number of videos;
-TextureView draws video with the GPU inside the app's window, at some CPU and GPU cost. The `view`
-column records which one ran. **Clock: off** removes the clock's CPU cost from the comparison.
+**Black tiles.** On the first test TV, only one hardware-decoded tile showed at a time, in 2- and
+4-tile grids alike; the others stayed black although their labels said playing at 15 fps. If you see
+that, run the same layout three ways and photograph each:
+
+1. **Video view: SurfaceView**, **Decoders: hardware first**: the baseline.
+2. **Video view: TextureView** (Media3 only): draws video with the GPU inside the app's window, at
+   some CPU and GPU cost, instead of handing it to the display hardware.
+3. **Video view: SurfaceView**, **Decoders: 1 hardware, rest software**: keeps the display hardware
+   for one tile and decodes the others in software (about 13% of a core per stream2 tile).
+
+The `view` and `decoder_preference` columns record which one ran, and the file name ends in
+`_textureview`, `_software` or `_1hardware`. **Clock: off** removes the clock's CPU cost from the
+comparison. Run `adb shell top` (above) during each.
 
 Finish with your real cameras: 2-view and, if you have four, 4-view on stream1.
 

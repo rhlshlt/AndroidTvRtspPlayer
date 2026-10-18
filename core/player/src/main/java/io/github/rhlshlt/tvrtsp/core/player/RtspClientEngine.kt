@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.view.SurfaceHolder
 import android.view.View
 import com.alexvas.rtsp.RtspClient
+import com.alexvas.rtsp.codec.VideoDecodeThread.DecoderType
 import com.alexvas.rtsp.widget.RtspDataListener
 import com.alexvas.rtsp.widget.RtspStatusListener
 import com.alexvas.rtsp.widget.RtspSurfaceView
@@ -129,6 +130,7 @@ class RtspClientEngine : StreamEngine {
         stopping = false
         startedAt = SystemClock.elapsedRealtime()
         v.experimentalUpdateSpsFrameWithLowLatencyParams = r.spsRewrite
+        v.videoDecoderType = if (r.preferSoftwareDecoder) DecoderType.SOFTWARE else DecoderType.HARDWARE
         v.init(
             uri = Uri.parse(r.url.requestUri),
             username = r.url.username,

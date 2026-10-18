@@ -53,6 +53,7 @@ import io.github.rhlshlt.tvrtsp.data.AppVisibility
 import io.github.rhlshlt.tvrtsp.data.Camera
 import io.github.rhlshlt.tvrtsp.data.CameraStore
 import io.github.rhlshlt.tvrtsp.data.PlayerSettings
+import io.github.rhlshlt.tvrtsp.data.TileDecoders
 import io.github.rhlshlt.tvrtsp.ui.components.ButtonRow
 import io.github.rhlshlt.tvrtsp.ui.components.LatencyClock
 import io.github.rhlshlt.tvrtsp.ui.components.OptionButton
@@ -69,7 +70,7 @@ private val MULTI_COLUMNS = listOf(
     "time_ms", "tiles", "engine", "stream", "tile", "camera", "state", "first_frame_ms", "width", "height",
     "fps", "frames_dropped", "decoder", "low_latency_applied", "playing_tiles", "total_fps",
     "app_cpu_pct_one_core", "threads", "java_heap_mb", "native_heap_mb", "pss_mb", "thermal",
-    "view", "clock", "decoder_low_latency_supported", "buffered_ms", "guard_restarts",
+    "view", "clock", "decoder_low_latency_supported", "buffered_ms", "guard_restarts", "decoder_preference",
 )
 
 /**
@@ -114,6 +115,9 @@ private fun MultiViewSetup(onStart: () -> Unit, back: () -> Unit) {
             OptionButton("Video view", tileView(s.tileEngine, s.tileView).label, {
                 s.tileView = if (s.tileView == VideoView.SURFACE_VIEW) VideoView.TEXTURE_VIEW else VideoView.SURFACE_VIEW
             }, enabled = s.tileEngine.textureView)
+            OptionButton("Decoders", s.tileDecoders.label, {
+                s.tileDecoders = TileDecoders.entries[(s.tileDecoders.ordinal + 1) % TileDecoders.entries.size]
+            })
             OptionButton("Clock", if (s.tileClock) "on" else "off", { s.tileClock = !s.tileClock })
         }
         ButtonRow {
@@ -122,7 +126,7 @@ private fun MultiViewSetup(onStart: () -> Unit, back: () -> Unit) {
         }
         Text(
             "SurfaceView hands video to the display hardware; TextureView draws it with the GPU (Media3 only). " +
-                "If a tile stays black while its label says playing, compare the two.",
+                "If a tile stays black while its label says playing, compare the two, or keep hardware decoding for one tile only.",
             color = TvColors.Muted,
         )
         val distinct = cameras.map { it.main.requestUri }.distinct().size
@@ -150,10 +154,17 @@ private fun MultiViewRun() {
     val useSub = s.tilesUseSub
     val videoView = tileView(kind, s.tileView)
     val clock = s.tileClock
-    val engines = remember(tiles, kind, videoView) { List(tiles) { i -> StreamEngine.create(kind, context, "tile-$i", videoView) } }
+    val decoders = s.tileDecoders
+    val engines = remember(tiles, kind, videoView, decoders) { List(tiles) { i -> StreamEngine.create(kind, context, "tile-$i", videoView) } }
     DisposableEffect(engines) { onDispose { engines.forEach { it.release() } } }
     val logger = remember(engines) {
-        val name = "multiview_${tiles}_${kind.name.lowercase()}" + if (videoView == VideoView.TEXTURE_VIEW) "_textureview" else ""
+        val name = "multiview_${tiles}_${kind.name.lowercase()}" +
+            (if (videoView == VideoView.TEXTURE_VIEW) "_textureview" else "") +
+            when (decoders) {
+                TileDecoders.HARDWARE_FIRST -> ""
+                TileDecoders.SOFTWARE -> "_software"
+                TileDecoders.ONE_HARDWARE -> "_1hardware"
+            }
         MetricsLogger(MetricsLogger.directory(context), name, MULTI_COLUMNS)
     }
     DisposableEffect(logger) { onDispose { logger.close() } }
@@ -188,6 +199,7 @@ private fun MultiViewRun() {
                     audio = false,
                     lowLatencyDecoding = true,
                     bufferProfile = BufferProfile.BALANCED,
+                    preferSoftwareDecoder = decoders.preferSoftware(i),
                 ),
             )
             if ((i + 1) % s.waveSize == 0 && i + 1 < engines.size) delay(1_000)
@@ -218,6 +230,7 @@ private fun MultiViewRun() {
                     t.width, t.height, fps.getOrNull(i), t.framesDropped, t.decoderName, t.lowLatencyDecoding,
                     playing, total, ps.cpuPercentOneCore, ps.threads, ps.javaHeapMb, ps.nativeHeapMb, ps.pssMb, ps.thermalStatus,
                     videoView.label, if (clock) "on" else "off", t.decoderLowLatencySupported, t.bufferedMs, t.guardRestarts,
+                    if (decoders.preferSoftware(i)) "software" else "hardware",
                 ))
             }
         }
@@ -239,9 +252,10 @@ private fun MultiViewRun() {
             TileLabel(engines[i], stats.getOrNull(i), fps.getOrNull(i), cameraName(i))
         }
         val ps = sample
+        // Two lines, so the clock in the bottom-right corner doesn't cover the end.
         Text(
-            "$tiles tiles · ${kind.label} · ${videoView.label} · ${if (useSub) "sub" else "main"} · playing $playingTiles/$tiles · " +
-                "total ${fmt(fps.sumOf { it ?: 0.0 })} fps · dropped ${stats.sumOf { it.framesDropped ?: 0L }} · " +
+            "$tiles tiles · ${kind.label} · ${videoView.label} · ${if (useSub) "sub" else "main"} · decoders ${decoders.label}\n" +
+                "playing $playingTiles/$tiles · total ${fmt(fps.sumOf { it ?: 0.0 })} fps · dropped ${stats.sumOf { it.framesDropped ?: 0L }} · " +
                 "app CPU ${ps?.cpuPercentOneCore?.let { fmt(it) } ?: "–"}% · threads ${ps?.threads ?: "–"} · Back stops",
             modifier = Modifier.align(Alignment.BottomStart).padding(12.dp).background(TvColors.Panel, RoundedCornerShape(6.dp)).padding(8.dp),
             fontFamily = FontFamily.Monospace,

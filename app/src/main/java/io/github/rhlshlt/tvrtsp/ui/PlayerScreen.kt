@@ -76,7 +76,7 @@ private val PLAYER_COLUMNS = listOf(
     "sps_rewrite", "state", "first_frame_ms", "width", "height", "fps", "frames_dropped", "buffered_ms",
     "network_latency_ms", "decoder_latency_ms", "decoder", "low_latency_applied", "app_cpu_pct_one_core",
     "threads", "java_heap_mb", "native_heap_mb", "pss_mb", "thermal",
-    "decoder_low_latency_supported", "latency_guard", "guard_restarts", "overlay",
+    "decoder_low_latency_supported", "latency_guard", "guard_restarts", "overlay", "decoder_preference",
 )
 
 /**
@@ -103,7 +103,9 @@ fun PlayerScreen(startIndex: Int, back: () -> Unit) {
     var restart by remember { mutableIntStateOf(0) }
     val foreground by AppVisibility.foreground.collectAsState()
 
-    val request = remember(camera, s.useSub, s.transport, s.audio, s.lowLatencyDecoding, s.bufferProfile, s.spsRewrite, s.latencyGuard) {
+    val request = remember(
+        camera, s.useSub, s.transport, s.audio, s.lowLatencyDecoding, s.bufferProfile, s.spsRewrite, s.latencyGuard, s.preferSoftwareDecoder,
+    ) {
         StreamRequest(
             url = camera.url(s.useSub),
             label = "${camera.name} · ${if (s.useSub && camera.sub != null) "sub" else "main"}",
@@ -113,6 +115,7 @@ fun PlayerScreen(startIndex: Int, back: () -> Unit) {
             bufferProfile = s.bufferProfile,
             spsRewrite = s.spsRewrite,
             latencyGuard = s.latencyGuard,
+            preferSoftwareDecoder = s.preferSoftwareDecoder,
         )
     }
     val engine = remember(s.engine) { StreamEngine.create(s.engine, context, "full-a") }
@@ -136,7 +139,7 @@ fun PlayerScreen(startIndex: Int, back: () -> Unit) {
             st?.decoderLatencyMs, st?.decoderName, st?.lowLatencyDecoding, ps?.cpuPercentOneCore, ps?.threads,
             ps?.javaHeapMb, ps?.nativeHeapMb, ps?.pssMb, ps?.thermalStatus,
             st?.decoderLowLatencySupported, request.latencyGuard && engine.kind == EngineKind.MEDIA3, st?.guardRestarts,
-            overlay.name.lowercase(),
+            overlay.name.lowercase(), if (request.preferSoftwareDecoder) "software" else "hardware",
         ))
     }
 
@@ -261,7 +264,8 @@ private fun MetricsOverlay(
         if (stats != null) {
             add("${stats.width}×${stats.height}  ·  ${fps?.let { fmt(it) } ?: "–"} fps  ·  dropped ${stats.framesDropped ?: "–"}" +
                 (stats.bufferedMs?.let { "  ·  buffered $it ms" } ?: "") to Color.White)
-            add("Decoder ${stats.decoderName ?: "–"}  ·  low-latency mode ${lowLatencyText(stats)}" to Color.White)
+            add("Decoder ${stats.decoderName ?: "–"}${if (request.preferSoftwareDecoder) " (software first)" else ""}  ·  " +
+                "low-latency mode ${lowLatencyText(stats)}" to Color.White)
             if (stats.networkLatencyMs != null || stats.decoderLatencyMs != null) {
                 add("Network ${stats.networkLatencyMs ?: "–"} ms  ·  decoder ${stats.decoderLatencyMs ?: "–"} ms" to Color.White)
             }
@@ -325,6 +329,9 @@ private fun ControlPanel(onRestart: () -> Unit, onMark: () -> Unit, onClose: () 
                 s.engine = if (media3) EngineKind.RTSP_CLIENT else EngineKind.MEDIA3
             }, Modifier.focusRequester(first))
             OptionButton("Stream", if (s.useSub) "sub" else "main", { s.useSub = !s.useSub })
+            OptionButton("Decoder", if (s.preferSoftwareDecoder) "software first" else "hardware first", {
+                s.preferSoftwareDecoder = !s.preferSoftwareDecoder
+            })
             OptionButton("Transport", s.transport.name, { s.transport = if (s.transport == Transport.TCP) Transport.UDP else Transport.TCP })
             OptionButton("Audio", if (s.audio) "on" else "off", { s.audio = !s.audio })
         }

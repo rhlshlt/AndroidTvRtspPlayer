@@ -70,6 +70,12 @@ data class StreamRequest(
     val spsRewrite: Boolean = false,
     /** Media3: restart the player when more than [BufferProfile.guardMs] of video piles up. */
     val latencyGuard: Boolean = true,
+    /**
+     * Try Android's software decoder before the hardware one. On the first test TV only one
+     * hardware-decoded video showed at a time in SurfaceViews, so multi-view can give every tile but
+     * one a software decoder; stream2 costs about 13% of one core that way.
+     */
+    val preferSoftwareDecoder: Boolean = false,
 )
 
 sealed interface EngineState {
