@@ -16,9 +16,13 @@ import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * rtsp-client-android: unbuffered playback straight into MediaCodec, which always requests
- * low-latency decoding. Connection callbacks arrive on the main thread; first-frame and frame-size
- * callbacks arrive on its decoder thread, so state is kept in thread-safe holders.
+ * rtsp-client-android: unbuffered playback straight into MediaCodec. Its decoder setup (6.1.1) adds
+ * vendor hints such as `vdec-lowlatency` and a high operating rate, but not Android's
+ * KEY_LOW_LATENCY, so [stats] reports low-latency decoding as off and says whether the decoder would
+ * support it. Its real latency lever is the SPS rewrite ([StreamRequest.spsRewrite]).
+ *
+ * Connection callbacks arrive on the main thread; first-frame and frame-size callbacks arrive on its
+ * decoder thread, so state is kept in thread-safe holders.
  *
  * The library stops a session asynchronously, and the old session's thread stops "the" decoders
  * when it ends, which would hit a new session's decoders on a quick restart. So a restart waits
@@ -153,12 +157,14 @@ class RtspClientEngine : StreamEngine {
 
     override fun stats(): EngineStats {
         val s = view?.statistics
+        val decoder = s?.videoDecoderName
         return EngineStats(
             engine = kind,
             width = width,
             height = height,
-            decoderName = s?.videoDecoderName,
-            lowLatencyDecoding = true,
+            decoderName = decoder,
+            lowLatencyDecoding = if (decoder != null) false else null,
+            decoderLowLatencySupported = DecoderFeatures.lowLatencySupported(decoder),
             framesReceived = framesReceived.get(),
             networkLatencyMs = s?.networkLatencyMsec?.takeIf { it >= 0 },
             decoderLatencyMs = s?.videoDecoderLatencyMsec?.takeIf { it >= 0 },

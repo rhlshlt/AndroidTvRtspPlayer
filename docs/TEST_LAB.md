@@ -32,13 +32,13 @@ viewer's in the app.
 2. Start MediaMTX, either with Docker Desktop:
 
    ```powershell
-   cd D:\Projects\TvRtspPlayer\testlab
+   cd D:\Projects\AndroidTvRtspPlayer\testlab
    docker compose up -d
    ```
 
    or without Docker: download `mediamtx_v1.21.0_windows_amd64.zip` from the
    [MediaMTX releases](https://github.com/bluenviron/mediamtx/releases), extract it, and run
-   `mediamtx.exe D:\Projects\TvRtspPlayer\testlab\mediamtx.yml`. Allow it through Windows Firewall
+   `mediamtx.exe D:\Projects\AndroidTvRtspPlayer\testlab\mediamtx.yml`. Allow it through Windows Firewall
    on private networks (TCP 8554, UDP 8000–8001).
 3. Make the clips once (about a minute):
 

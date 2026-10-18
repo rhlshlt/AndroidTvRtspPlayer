@@ -142,7 +142,11 @@ class RtspUrl private constructor(
             null
         }
 
-        /** Builds a URL from separate fields, as the add-camera form does. */
+        /**
+         * Builds a URL from separate fields, as the add-camera form does. [host] may include a port,
+         * as in `203.0.113.5:18554` or `[fe80::1]:8554`; a port written there wins over [port]. A bare
+         * IPv6 literal such as `fe80::1` is an address without a port; add brackets to give it one.
+         */
         fun of(
             host: String,
             path: String,
@@ -151,11 +155,39 @@ class RtspUrl private constructor(
             password: String? = null,
             scheme: String = "rtsp",
         ): RtspUrl {
-            val h = host.trim().removePrefix("[").removeSuffix("]")
+            val (h, hostPort) = splitHostAndPort(host)
             val hostPart = if (h.contains(':')) "[$h]" else h
-            val portPart = if (port != null) ":$port" else ""
+            val portPart = (hostPort ?: port)?.let { ":$it" } ?: ""
             val p = if (path.startsWith("/")) path else "/$path"
             return parse("$scheme://$hostPart$portPart$p").withCredentials(username, password)
+        }
+
+        /**
+         * Splits an address typed into a form into host and optional port: `cam.lan`, `cam.lan:8554`,
+         * `192.168.1.20:554`, `[2001:db8::5]:8554`, or a bare IPv6 literal (never a port). The host is
+         * checked later, when the URL is parsed.
+         */
+        fun splitHostAndPort(input: String): Pair<String, Int?> {
+            val text = input.trim()
+            fail(text.isEmpty(), RtspUrlException.Reason.HOST, "Enter the camera's address")
+            fail(text.contains("://"), RtspUrlException.Reason.HOST,
+                "Enter only the address, for example 192.168.1.20 or 203.0.113.5:18554; full rtsp:// URLs go under Any RTSP URL")
+            fail(text.any { it == '/' || it == '@' || it == '?' || it == '#' || it.isWhitespace() }, RtspUrlException.Reason.HOST,
+                "Enter only the address, for example 192.168.1.20 or 203.0.113.5:18554")
+            if (text.startsWith("[")) {
+                val close = text.indexOf(']')
+                fail(close < 0, RtspUrlException.Reason.HOST, "IPv6 address is missing ']'")
+                val after = text.substring(close + 1)
+                fail(after.isNotEmpty() && !after.startsWith(":"), RtspUrlException.Reason.HOST,
+                    "Unexpected text after the IPv6 address")
+                return text.substring(1, close) to after.takeIf { it.startsWith(":") }?.let { parsePort(it.substring(1)) }
+            }
+            val colon = text.indexOf(':')
+            return when {
+                colon < 0 -> text to null
+                text.indexOf(':', colon + 1) < 0 -> text.substring(0, colon) to parsePort(text.substring(colon + 1))
+                else -> text to null // two or more colons: an IPv6 literal without a port
+            }
         }
 
         private fun parseAuthority(authority: String): Pair<String, Int?> {
@@ -179,12 +211,13 @@ class RtspUrl private constructor(
                 portText = if (colon >= 0) authority.substring(colon + 1) else null
                 fail(!isValidHostName(host), RtspUrlException.Reason.HOST, "Invalid host name \"$host\"")
             }
-            val port = portText?.let {
-                fail(it.isEmpty() || it.length > 5 || !it.all(Char::isDigit), RtspUrlException.Reason.PORT,
-                    "Port must be a number from 1 to 65535")
-                it.toInt().also { p -> fail(p !in 1..65535, RtspUrlException.Reason.PORT, "Port must be from 1 to 65535") }
-            }
-            return host to port
+            return host to portText?.let(::parsePort)
+        }
+
+        private fun parsePort(text: String): Int {
+            fail(text.isEmpty() || text.length > 5 || !text.all { it in '0'..'9' }, RtspUrlException.Reason.PORT,
+                "Port must be a number from 1 to 65535")
+            return text.toInt().also { fail(it !in 1..65535, RtspUrlException.Reason.PORT, "Port must be from 1 to 65535") }
         }
 
         private fun isValidHostName(host: String): Boolean {
@@ -193,11 +226,41 @@ class RtspUrl private constructor(
             return host.all { it.isLetterOrDigit() && it.code < 0x80 || it == '-' || it == '.' || it == '_' }
         }
 
-        private fun isValidIpv6(host: String): Boolean {
+        /**
+         * RFC 4291 text form: eight groups of 1–4 hex digits, one `::` for a run of zero groups, an
+         * IPv4 address in the last 32 bits, and an optional zone after `%` (RFC 6874 writes `%25`).
+         */
+        internal fun isValidIpv6(host: String): Boolean {
             val zoneAt = host.indexOf('%')
+            if (zoneAt == host.length - 1) return false
             val address = if (zoneAt >= 0) host.substring(0, zoneAt) else host
-            if (address.isEmpty() || !address.contains(':')) return false
-            return address.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.' }
+            if (!address.contains(':')) return false
+            val gap = address.indexOf("::")
+            if (gap >= 0 && address.indexOf("::", gap + 1) >= 0) return false
+            val halves = if (gap >= 0) listOf(address.substring(0, gap), address.substring(gap + 2)) else listOf(address)
+            var groups = 0
+            halves.forEachIndexed { h, half ->
+                if (half.isEmpty()) return@forEachIndexed
+                val parts = half.split(':')
+                parts.forEachIndexed { i, part ->
+                    val last = h == halves.lastIndex && i == parts.lastIndex
+                    if (last && part.contains('.')) {
+                        if (!isValidIpv4(part)) return false
+                        groups += 2
+                    } else {
+                        if (part.isEmpty() || part.length > 4 || !part.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return false
+                        groups += 1
+                    }
+                }
+            }
+            return if (gap >= 0) groups <= 7 else groups == 8
+        }
+
+        private fun isValidIpv4(text: String): Boolean {
+            val parts = text.split('.')
+            return parts.size == 4 && parts.all { p ->
+                p.length in 1..3 && p.all { it in '0'..'9' } && p.toInt() <= 255
+            }
         }
 
         private fun fail(condition: Boolean, reason: RtspUrlException.Reason, message: String) {

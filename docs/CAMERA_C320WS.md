@@ -2,9 +2,10 @@
 
 The C320WS streams 2560 × 1440 (stream1) and 640 × 360 (stream2) H.264 Main at 15 fps with G.711
 A-law audio over RTSP, and its SDP carries SPS and PPS, which is what Media3 needs. Two things decide
-how it plays on a TV: stream1 needs an H.264 **Level 5.0** decoder, and neither stream's SPS limits
-frame reordering, so a decoder may hold up to 7–8 frames (about 0.5 s) unless low-latency decoding
-is used. Phase 0 measures both.
+how it plays on a TV: stream1 needs an H.264 **Level 5.0** decoder that accepts 2560-pixel-wide
+pictures, and neither stream's SPS limits frame reordering, so a decoder may hold up to 7–8 frames
+(about 0.5 s) unless low-latency decoding or rtsp-client-android's SPS rewrite is used. The first
+measurements are under [Measured so far](#measured-so-far).
 
 ## Connecting
 
@@ -53,17 +54,18 @@ independent Python parser:
 
 What follows from this:
 
-- **Decoder level.** 2560 × 1440 is 14,400 macroblocks per frame, more than Level 4.2 allows
-  (8,704), so a decoder must support Level 5.0. Many 1080p-only TV boxes stop at 4.2. The app's
-  device profile reports the highest level each decoder lists; if it's below 5.0, full screen falls
-  back to stream2. Some decoders under-report, so Phase 0 also just plays stream1.
+- **Decoder level and size.** 2560 × 1440 is 14,400 macroblocks per frame, more than Level 4.2
+  allows (8,704), so a decoder must support Level 5.0. Many 1080p-only TV boxes stop at 4.2. Level
+  alone isn't enough: the first test TV's Realtek decoder lists Level 5.1 but stops at 1920 pixels
+  wide, so it can't decode stream1 at all. The app's device profile checks both; where either falls
+  short, full screen uses stream2.
 - **Decoder delay.** With no reorder limit, H.264 lets a decoder hold up to MaxDpbFrames frames.
-  Both engines can ask for Android's low-latency decoding mode (`KEY_LOW_LATENCY`, API 30+);
-  rtsp-client-android can also rewrite the SPS to declare no reordering, which is safe only if the
-  camera sends no B-frames. `camcheck` reports B-frames; none are expected.
+  Media3 can ask for Android's low-latency decoding mode (`KEY_LOW_LATENCY`, API 30+) where the
+  decoder offers it; rtsp-client-android 6.1.1 sends only vendor hints, but can rewrite the SPS to
+  declare no reordering, which is safe only if the camera sends no B-frames. `camcheck` found none.
 - **Media3 compatibility.** Media3 1.11.1 needs `sprop-parameter-sets` with exactly two entries,
-  SPS first. Both lines meet that. It also needs an `a=control` line per track, which only the full
-  SDP shows: run `camcheck --sdp` and keep the output.
+  SPS first, and an `a=control` line per track. Both lines meet the first rule, and the full SDP
+  from `camcheck --sdp` meets the second.
 - **Contrast.** The full-range flag means black is 0, not 16. Compare a frame on the TV with the
   Tapo app; a washed-out or crushed picture means a decoder or display ignores the flag.
 
@@ -81,20 +83,35 @@ What follows from this:
 A 4K30 decoder handles about 249 Mpx/s, so the full-resolution 4-view needs roughly 90% of one. The
 16-view is light on throughput; its limit is how many decoder instances the TV allows.
 
+## Measured so far
+
+One camera checked with `camcheck` in daylight on Oct 16, 2026, and the first TV (a Panasonic with a
+Realtek decoder) on Oct 17–18; full tables in [PHASE0_RESULTS.md](PHASE0_RESULTS.md).
+
+| Question | Answer |
+| --- | --- |
+| Sign-in | Digest with MD5, realm "TP-Link IP-Camera", no qop; both engines sign in |
+| Keyframe interval | 2.00 s on both streams, steady |
+| B-frames | None (899 and 900 frames checked), so the SPS rewrite is safe |
+| Daytime bitrate | stream1 1,481 kbit/s (keyframes about 176 KB); stream2 125 kbit/s (about 28 KB) |
+| First keyframe after PLAY | 62 ms (stream1) and 55 ms (stream2): switching needn't wait for the next keyframe |
+| Arrival jitter on Wi-Fi | Up to 496 ms (stream1) and 552 ms (stream2) |
+| Decoder hold on the Realtek TV, stream2 | About 600 ms as sent; 259–273 ms with rtsp-client-android's SPS rewrite |
+| stream1 on the Realtek TV | Software decoding only: 13–15 fps with rtsp-client-android, 4–7 fps with Media3 |
+| Two viewers per camera | Worked: four tiles on two cameras, two sessions each |
+
 ## Still to measure in Phase 0
 
 Each item has its command in [PHASE0_GUIDE.md](PHASE0_GUIDE.md).
 
 | Question | How | Recorded in |
 | --- | --- | --- |
-| Keyframe interval (the floor for switching time) | `camcheck --tapo <ip> --user <account> --seconds 60` | Camera checks |
-| B-frames (decides whether the SPS rewrite is safe) | same | Camera checks |
-| Bitrate of both streams, by day and at night (infrared) | same, in daylight and at night | Camera checks |
-| Full SDP: `a=control`, session name, extra tracks | `camcheck ... --sdp` | Camera checks; add it to the unit tests |
-| Digest challenge format, and whether both engines can sign in | `camcheck` authentication section | Camera checks |
+| Bitrate of both streams at night (infrared) | `camcheck --tapo <ip> --user <account> --seconds 60` at night | Camera checks |
+| The other cameras' keyframe interval, B-frames and sign-in | same, once per camera | Camera checks |
+| Full SDP in the unit tests | paste the `camcheck ... --sdp` output into `SdpTest` | Camera checks |
 | What a third RTSP viewer gets (error code or refused connection) | `camcheck ... --parallel 3` while nothing else watches | Viewer limit |
 | Whether special characters in the Camera Account password work | a second camera account with symbols | Camera checks |
-| How long each TV's decoder holds frames | the player's delay test, low-latency decoding on and off | Delay |
+| How long the other TVs' decoders hold frames | the player's delay test, low-latency decoding on and off | Delay |
 | Whether contrast matches the Tapo app | side-by-side photo | Notes |
 | Behaviour in Privacy Mode and during a firmware update | play, switch Privacy Mode on, watch the error | Notes |
 

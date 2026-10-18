@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import io.github.rhlshlt.tvrtsp.core.player.BufferProfile
 import io.github.rhlshlt.tvrtsp.core.player.EngineKind
 import io.github.rhlshlt.tvrtsp.core.player.Transport
+import io.github.rhlshlt.tvrtsp.core.player.VideoView
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -19,12 +20,16 @@ object PlayerSettings {
     var lowLatencyDecoding by mutableStateOf(true)
     var spsRewrite by mutableStateOf(false)
     var audio by mutableStateOf(false)
+    /** Media3: restart the player when video piles up (BufferProfile.guardMs). */
+    var latencyGuard by mutableStateOf(true)
 
     // Multi-view capacity test
     var tiles by mutableIntStateOf(4)
     var tileEngine by mutableStateOf(EngineKind.MEDIA3)
     var tilesUseSub by mutableStateOf(true)
     var waveSize by mutableIntStateOf(4)
+    var tileView by mutableStateOf(VideoView.SURFACE_VIEW)
+    var tileClock by mutableStateOf(true)
 }
 
 /** Whether the activity is visible; screens stop every stream when it isn't. */

@@ -6,16 +6,36 @@ import io.github.rhlshlt.tvrtsp.core.rtsp.RtspUrl
 import kotlinx.coroutines.flow.StateFlow
 
 /** The engines Phase 0 compares on the C320WS. */
-enum class EngineKind(val label: String) {
-    MEDIA3("Media3"),
-    RTSP_CLIENT("rtsp-client-android"),
+enum class EngineKind(
+    val label: String,
+    /** Whether the engine can render into a TextureView ([VideoView.TEXTURE_VIEW]). */
+    val textureView: Boolean,
+) {
+    MEDIA3("Media3", textureView = true),
+    RTSP_CLIENT("rtsp-client-android", textureView = false),
 }
 
 enum class Transport { TCP, UDP }
 
 /**
+ * How an engine shows video. A SurfaceView hands decoded frames to the display hardware; a
+ * TextureView draws them with the GPU inside the app's window. On the first test TV, one of two
+ * hardware-decoded SurfaceView tiles stayed black in a 4-tile grid; TextureView tests whether the
+ * GPU path shows them all, and at what CPU cost.
+ */
+enum class VideoView(val label: String) {
+    SURFACE_VIEW("SurfaceView"),
+    TEXTURE_VIEW("TextureView"),
+}
+
+/**
  * Media3 buffer thresholds (DefaultLoadControl). RTSP is pushed by the camera, so these mostly set
  * how long playback waits before starting, which adds directly to the delay behind live.
+ *
+ * [guardMs] is the latency guard's limit. RTSP gives the camera no signal to slow down, so when
+ * decoding falls behind, video piles up in memory: on the first test TV, Media3 stalled on stream1
+ * and stored 617 s of video, growing its Java heap by about 10 MB a minute. The guard restarts the
+ * player when more than [guardMs] stays buffered for [LATENCY_GUARD_GRACE_MS].
  */
 enum class BufferProfile(
     val label: String,
@@ -23,11 +43,15 @@ enum class BufferProfile(
     val maxBufferMs: Int,
     val startMs: Int,
     val afterRebufferMs: Int,
+    val guardMs: Long,
 ) {
-    LOW_LATENCY("Low latency", 500, 1_000, 100, 300),
-    BALANCED("Balanced", 1_500, 3_000, 500, 1_000),
-    SMOOTH("Smooth", 3_000, 6_000, 1_500, 2_500),
+    LOW_LATENCY("Low latency", 500, 1_000, 100, 300, 3_000),
+    BALANCED("Balanced", 1_500, 3_000, 500, 1_000, 4_000),
+    SMOOTH("Smooth", 3_000, 6_000, 1_500, 2_500, 8_000),
 }
+
+/** How long the buffer may stay above [BufferProfile.guardMs] before the guard restarts the player. */
+const val LATENCY_GUARD_GRACE_MS = 5_000L
 
 /** Everything an engine needs to play one stream. */
 data class StreamRequest(
@@ -44,6 +68,8 @@ data class StreamRequest(
     val rtspTimeoutMs: Long = 8_000,
     /** rtsp-client-android: rewrite the SPS to declare no frame reordering (only safe without B-frames). */
     val spsRewrite: Boolean = false,
+    /** Media3: restart the player when more than [BufferProfile.guardMs] of video piles up. */
+    val latencyGuard: Boolean = true,
 )
 
 sealed interface EngineState {
@@ -69,8 +95,13 @@ data class EngineStats(
     val width: Int = 0,
     val height: Int = 0,
     val decoderName: String? = null,
-    /** Whether low-latency decoding was requested from the codec (null when unknown). */
+    /**
+     * Whether Android's low-latency decoding mode is on: MediaFormat.KEY_LOW_LATENCY was set, which
+     * only works when the decoder advertises it ([decoderLowLatencySupported]). Null when unknown.
+     */
     val lowLatencyDecoding: Boolean? = null,
+    /** Whether the decoder advertises the low-latency mode (FEATURE_LowLatency); null when unknown. */
+    val decoderLowLatencySupported: Boolean? = null,
     val framesRendered: Long? = null,
     val framesDropped: Long? = null,
     val framesReceived: Long? = null,
@@ -79,6 +110,10 @@ data class EngineStats(
     val decoderLatencyMs: Int? = null,
     val firstFrameMs: Long? = null,
     val errors: Int = 0,
+    /** Media3: the latency guard's limit while the guard is on, else null. */
+    val guardLimitMs: Long? = null,
+    /** Media3: how often the latency guard restarted the player since the last start(). */
+    val guardRestarts: Int = 0,
 )
 
 /**
@@ -90,7 +125,7 @@ interface StreamEngine {
     val kind: EngineKind
     val state: StateFlow<EngineState>
 
-    /** Creates the SurfaceView this engine renders into. */
+    /** Creates the view this engine renders into: a SurfaceView, or a TextureView if created with one. */
     fun createView(context: Context): View
 
     fun start(request: StreamRequest)
@@ -104,8 +139,14 @@ interface StreamEngine {
     companion object {
         const val USER_AGENT = "TvRtspPlayer/0.1 (Phase 0)"
 
-        fun create(kind: EngineKind, context: Context, name: String = "player"): StreamEngine = when (kind) {
-            EngineKind.MEDIA3 -> Media3Engine(context, name)
+        /** [view] applies where [EngineKind.textureView] allows it; other engines use a SurfaceView. */
+        fun create(
+            kind: EngineKind,
+            context: Context,
+            name: String = "player",
+            view: VideoView = VideoView.SURFACE_VIEW,
+        ): StreamEngine = when (kind) {
+            EngineKind.MEDIA3 -> Media3Engine(context, name, view)
             EngineKind.RTSP_CLIENT -> RtspClientEngine()
         }
     }

@@ -16,6 +16,15 @@ class TapoTest {
     }
 
     @Test
+    fun takesAForwardedPortFromTheAddress() {
+        val s = Tapo.streams("203.0.113.5:18554", "tapoview", "secret123")
+        assertEquals("rtsp://203.0.113.5:18554/stream1", s.main.requestUri)
+        assertEquals("rtsp://203.0.113.5:18554/stream2", s.sub.requestUri)
+        assertEquals("203.0.113.5", s.main.host)
+        assertEquals("secret123", s.main.password)
+    }
+
+    @Test
     fun buildsTelephotoUrls() {
         val s = Tapo.streams("cam.lan", lens = TapoLens.TELEPHOTO)
         assertEquals("rtsp://cam.lan:554/stream6", s.main.requestUri)

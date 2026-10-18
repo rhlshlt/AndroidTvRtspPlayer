@@ -17,13 +17,15 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecAdapter
  * Media3 has no switch for this, so the codec adapter factory is wrapped: the key is added to the
  * MediaFormat just before the codec is configured.
  *
- * @param onVideoCodec called on the playback thread with the codec name and whether the key was set
+ * @param onVideoCodec called on the playback thread for every video codec Media3 configures (a
+ *   fallback calls it again): the codec name, whether it advertises the low-latency mode, and whether
+ *   the key was set
  */
 @OptIn(UnstableApi::class)
 class LowLatencyRenderersFactory(
     context: Context,
     private val requestLowLatency: Boolean,
-    private val onVideoCodec: (codecName: String, lowLatency: Boolean) -> Unit,
+    private val onVideoCodec: (codecName: String, supported: Boolean, applied: Boolean) -> Unit,
 ) : DefaultRenderersFactory(context) {
 
     override fun getCodecAdapterFactory(): MediaCodecAdapter.Factory {
@@ -34,7 +36,7 @@ class LowLatencyRenderersFactory(
                     ?.isFeatureSupported(CodecCapabilities.FEATURE_LowLatency) == true
                 val apply = requestLowLatency && supported
                 if (apply) configuration.mediaFormat.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                onVideoCodec(configuration.codecInfo.name, apply)
+                onVideoCodec(configuration.codecInfo.name, supported, apply)
             }
             delegate.createAdapter(configuration)
         }
