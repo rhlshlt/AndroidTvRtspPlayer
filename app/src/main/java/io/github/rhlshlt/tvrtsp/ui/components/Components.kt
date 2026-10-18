@@ -22,7 +22,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
@@ -191,17 +190,24 @@ fun ScrollableText(text: String, modifier: Modifier = Modifier, fontSize: TextUn
 }
 
 /**
- * Wall clock with milliseconds, redrawn every frame. Point the camera at the TV and photograph
- * both: the difference between this clock and its image in the video is the glass-to-glass delay.
+ * Wall clock with tenths of a second, redrawn 10 times a second. Point the camera at the TV and
+ * photograph both: the gap between this clock and the camera's own time stamp in the picture is the
+ * glass-to-glass delay. It used to redraw every frame, which looked like the app's biggest CPU cost
+ * on the first test TV (about 48% of a core with nothing playing); the camera's time stamp shows
+ * whole seconds, so tenths are precise enough.
  */
 @Composable
 fun LatencyClock(modifier: Modifier = Modifier, fontSize: TextUnit = 44.sp) {
-    val format = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT) }
-    val now by produceState(System.currentTimeMillis()) {
-        while (true) withFrameMillis { value = System.currentTimeMillis() }
+    val format = remember { SimpleDateFormat("HH:mm:ss", Locale.ROOT) }
+    val text by produceState("") {
+        while (true) {
+            val now = System.currentTimeMillis()
+            value = format.format(Date(now)) + "." + (now % 1_000 / 100)
+            delay(100 - now % 100) // wake at the next tenth
+        }
     }
     Text(
-        text = format.format(Date(now)),
+        text = text,
         modifier = modifier
             .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(6.dp))
             .padding(horizontal = 14.dp, vertical = 6.dp),

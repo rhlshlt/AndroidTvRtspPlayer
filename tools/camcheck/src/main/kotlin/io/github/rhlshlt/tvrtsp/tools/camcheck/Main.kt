@@ -21,7 +21,8 @@ Usage:
   camcheck [options] --tapo <ip-address> --user <camera-account>
 
 Options:
-  --tapo IP            Check a Tapo camera's main and sub stream (rtsp://IP:554/stream1 and /stream2)
+  --tapo IP            Check a Tapo camera's main and sub stream (rtsp://IP:554/stream1 and /stream2);
+                       IP:PORT uses another port
   --telephoto          With --tapo: use the telephoto lens (stream6 and stream7)
   --user NAME          Camera account user name (instead of putting it in the URL)
   --password-env VAR   Read the password from environment variable VAR (default: RTSP_PASSWORD)

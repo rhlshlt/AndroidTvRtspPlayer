@@ -62,19 +62,27 @@ import io.github.rhlshlt.tvrtsp.ui.theme.TvColors
 import kotlinx.coroutines.delay
 import java.util.Locale
 
-private enum class Overlay { FULL, CLOCK, NONE }
+/** What the player draws over the video; Up cycles through them. The clock costs CPU, so it can go. */
+private enum class Overlay(val metrics: Boolean, val clock: Boolean) {
+    FULL(metrics = true, clock = true),
+    METRICS(metrics = true, clock = false),
+    CLOCK(metrics = false, clock = true),
+    NONE(metrics = false, clock = false),
+}
 
+// New columns go at the end so older CSVs keep their column positions.
 private val PLAYER_COLUMNS = listOf(
     "time_ms", "event", "engine", "camera", "stream", "transport", "buffer_profile", "low_latency_requested",
     "sps_rewrite", "state", "first_frame_ms", "width", "height", "fps", "frames_dropped", "buffered_ms",
     "network_latency_ms", "decoder_latency_ms", "decoder", "low_latency_applied", "app_cpu_pct_one_core",
     "threads", "java_heap_mb", "native_heap_mb", "pss_mb", "thermal",
+    "decoder_low_latency_supported", "latency_guard", "guard_restarts", "overlay", "decoder_preference",
 )
 
 /**
  * Full-screen test player. Left/Right switch camera, Down switches main/sub stream, Up cycles the
- * overlay (metrics + clock, clock only, nothing), OK opens the test controls. Every second a row
- * goes to a CSV in the metrics folder.
+ * overlay (metrics and clock, metrics only, clock only, nothing), OK opens the test controls. Every
+ * second a row goes to a CSV in the metrics folder.
  */
 @Composable
 fun PlayerScreen(startIndex: Int, back: () -> Unit) {
@@ -95,7 +103,9 @@ fun PlayerScreen(startIndex: Int, back: () -> Unit) {
     var restart by remember { mutableIntStateOf(0) }
     val foreground by AppVisibility.foreground.collectAsState()
 
-    val request = remember(camera, s.useSub, s.transport, s.audio, s.lowLatencyDecoding, s.bufferProfile, s.spsRewrite) {
+    val request = remember(
+        camera, s.useSub, s.transport, s.audio, s.lowLatencyDecoding, s.bufferProfile, s.spsRewrite, s.latencyGuard, s.preferSoftwareDecoder,
+    ) {
         StreamRequest(
             url = camera.url(s.useSub),
             label = "${camera.name} · ${if (s.useSub && camera.sub != null) "sub" else "main"}",
@@ -104,6 +114,8 @@ fun PlayerScreen(startIndex: Int, back: () -> Unit) {
             lowLatencyDecoding = s.lowLatencyDecoding,
             bufferProfile = s.bufferProfile,
             spsRewrite = s.spsRewrite,
+            latencyGuard = s.latencyGuard,
+            preferSoftwareDecoder = s.preferSoftwareDecoder,
         )
     }
     val engine = remember(s.engine) { StreamEngine.create(s.engine, context, "full-a") }
@@ -126,6 +138,8 @@ fun PlayerScreen(startIndex: Int, back: () -> Unit) {
             st?.firstFrameMs, st?.width, st?.height, fps, st?.framesDropped, st?.bufferedMs, st?.networkLatencyMs,
             st?.decoderLatencyMs, st?.decoderName, st?.lowLatencyDecoding, ps?.cpuPercentOneCore, ps?.threads,
             ps?.javaHeapMb, ps?.nativeHeapMb, ps?.pssMb, ps?.thermalStatus,
+            st?.decoderLowLatencySupported, request.latencyGuard && engine.kind == EngineKind.MEDIA3, st?.guardRestarts,
+            overlay.name.lowercase(), if (request.preferSoftwareDecoder) "software" else "hardware",
         ))
     }
 
@@ -152,7 +166,8 @@ fun PlayerScreen(startIndex: Int, back: () -> Unit) {
             val st = engine.stats()
             val frames = st.framesRendered ?: st.framesReceived
             val now = SystemClock.elapsedRealtime()
-            fps = if (frames != null && lastFrames >= 0 && now > lastAt) (frames - lastFrames) * 1000.0 / (now - lastAt) else null
+            // Counters restart from zero when the latency guard rebuilds the player.
+            fps = if (frames != null && lastFrames in 0..frames && now > lastAt) (frames - lastFrames) * 1000.0 / (now - lastAt) else null
             lastFrames = frames ?: -1L
             lastAt = now
             stats = st
@@ -210,11 +225,11 @@ fun PlayerScreen(startIndex: Int, back: () -> Unit) {
                 modifier = Modifier.align(Alignment.Center).aspectRatio(ratio),
             )
         }
-        if (overlay != Overlay.NONE) LatencyClock(Modifier.align(Alignment.TopEnd).padding(24.dp))
-        if (overlay == Overlay.FULL) {
+        if (overlay.clock) LatencyClock(Modifier.align(Alignment.TopEnd).padding(24.dp))
+        if (overlay.metrics) {
             MetricsOverlay(request, engine.kind, state, stats, fps, sample, index, cameras.size, Modifier.align(Alignment.TopStart).padding(24.dp))
         }
-        StatusMessage(state, request, engine.kind, Modifier.align(Alignment.Center))
+        StatusMessage(state, request, engine.kind, stats?.guardRestarts ?: 0, Modifier.align(Alignment.Center))
         if (panel) {
             ControlPanel(
                 onRestart = {
@@ -242,23 +257,33 @@ private fun MetricsOverlay(
     count: Int,
     modifier: Modifier,
 ) {
+    // (text, colour) pairs; the colour marks state and warnings.
     val lines = buildList {
-        add("${index + 1}/$count  ${request.label}  ·  ${kind.label}  ·  ${request.transport}")
-        add("State ${stateName(state)}  ·  first frame ${stats?.firstFrameMs?.let { "$it ms" } ?: "–"}")
+        add("${index + 1}/$count  ${request.label}  ·  ${kind.label}  ·  ${request.transport}" to Color.White)
+        add("State ${stateName(state)}  ·  first frame ${stats?.firstFrameMs?.let { "$it ms" } ?: "–"}" to stateColor(state))
         if (stats != null) {
             add("${stats.width}×${stats.height}  ·  ${fps?.let { fmt(it) } ?: "–"} fps  ·  dropped ${stats.framesDropped ?: "–"}" +
-                (stats.bufferedMs?.let { "  ·  buffered $it ms" } ?: ""))
-            add("Decoder ${stats.decoderName ?: "–"}  ·  low latency ${stats.lowLatencyDecoding?.let { if (it) "on" else "off" } ?: "–"}")
+                (stats.bufferedMs?.let { "  ·  buffered $it ms" } ?: "") to Color.White)
+            add("Decoder ${stats.decoderName ?: "–"}${if (request.preferSoftwareDecoder) " (software first)" else ""}  ·  " +
+                "low-latency mode ${lowLatencyText(stats)}" to Color.White)
             if (stats.networkLatencyMs != null || stats.decoderLatencyMs != null) {
-                add("Network ${stats.networkLatencyMs ?: "–"} ms  ·  decoder ${stats.decoderLatencyMs ?: "–"} ms")
+                add("Network ${stats.networkLatencyMs ?: "–"} ms  ·  decoder ${stats.decoderLatencyMs ?: "–"} ms" to Color.White)
             }
         }
-        if (kind == EngineKind.MEDIA3) add("Buffer ${request.bufferProfile.label} (starts after ${request.bufferProfile.startMs} ms)")
+        if (kind == EngineKind.MEDIA3) {
+            val guard = stats?.guardLimitMs?.let { "guard at ${fmtSeconds(it)} s, restarts ${stats.guardRestarts}" } ?: "guard off"
+            add("Buffer ${request.bufferProfile.label} (starts after ${request.bufferProfile.startMs} ms)  ·  $guard" to Color.White)
+            val buffered = stats?.bufferedMs
+            val limit = stats?.guardLimitMs
+            if (buffered != null && limit != null && buffered > limit) {
+                add("Falling behind: ${fmtSeconds(buffered)} s buffered; restarting if it stays over ${fmtSeconds(limit)} s" to TvColors.Warn)
+            }
+        }
         if (sample != null) {
             add("App CPU ${sample.cpuPercentOneCore?.let { fmt(it) } ?: "–"}%  ·  threads ${sample.threads}  ·  " +
-                "heap ${fmt(sample.javaHeapMb)} MB  ·  native ${fmt(sample.nativeHeapMb)} MB  ·  thermal ${sample.thermalStatus}")
+                "heap ${fmt(sample.javaHeapMb)} MB  ·  native ${fmt(sample.nativeHeapMb)} MB  ·  thermal ${sample.thermalStatus}" to Color.White)
         }
-        add("←/→ camera  ·  ↓ main/sub  ·  ↑ overlay  ·  OK controls")
+        add("←/→ camera  ·  ↓ main/sub  ·  ↑ overlay  ·  OK controls" to Color.White)
     }
     Column(
         modifier
@@ -266,16 +291,18 @@ private fun MetricsOverlay(
             .background(TvColors.Panel, RoundedCornerShape(8.dp))
             .padding(14.dp),
     ) {
-        lines.forEachIndexed { i, line ->
-            Text(line, fontFamily = FontFamily.Monospace, fontSize = if (i == 0) 17.sp else 14.sp, color = if (i == 1) stateColor(state) else Color.White)
+        lines.forEachIndexed { i, (line, color) ->
+            Text(line, fontFamily = FontFamily.Monospace, fontSize = if (i == 0) 17.sp else 14.sp, color = color)
         }
     }
 }
 
 @Composable
-private fun StatusMessage(state: EngineState, request: StreamRequest, kind: EngineKind, modifier: Modifier) {
+private fun StatusMessage(state: EngineState, request: StreamRequest, kind: EngineKind, guardRestarts: Int, modifier: Modifier) {
     val text = when (state) {
-        is EngineState.Connecting -> "Connecting to ${request.label} with ${kind.label}…"
+        is EngineState.Connecting ->
+            if (guardRestarts > 0) "Rejoining live: the latency guard restarted ${request.label} (restart $guardRestarts)…"
+            else "Connecting to ${request.label} with ${kind.label}…"
         is EngineState.Error -> "${state.code}: ${state.message}\nOK: options  ·  ←/→: other camera"
         is EngineState.Ended -> "Stream ended: nothing arrived for ${request.rtspTimeoutMs / 1000} s. OK → Restart"
         is EngineState.Buffering -> "Buffering…"
@@ -302,6 +329,9 @@ private fun ControlPanel(onRestart: () -> Unit, onMark: () -> Unit, onClose: () 
                 s.engine = if (media3) EngineKind.RTSP_CLIENT else EngineKind.MEDIA3
             }, Modifier.focusRequester(first))
             OptionButton("Stream", if (s.useSub) "sub" else "main", { s.useSub = !s.useSub })
+            OptionButton("Decoder", if (s.preferSoftwareDecoder) "software first" else "hardware first", {
+                s.preferSoftwareDecoder = !s.preferSoftwareDecoder
+            })
             OptionButton("Transport", s.transport.name, { s.transport = if (s.transport == Transport.TCP) Transport.UDP else Transport.TCP })
             OptionButton("Audio", if (s.audio) "on" else "off", { s.audio = !s.audio })
         }
@@ -310,6 +340,7 @@ private fun ControlPanel(onRestart: () -> Unit, onMark: () -> Unit, onClose: () 
                 s.bufferProfile = BufferProfile.entries[(s.bufferProfile.ordinal + 1) % BufferProfile.entries.size]
             }, enabled = media3)
             OptionButton("Low-latency decoding", if (s.lowLatencyDecoding) "on" else "off", { s.lowLatencyDecoding = !s.lowLatencyDecoding }, enabled = media3)
+            OptionButton("Latency guard", if (s.latencyGuard) "on" else "off", { s.latencyGuard = !s.latencyGuard }, enabled = media3)
             OptionButton("SPS rewrite", if (s.spsRewrite) "on" else "off", { s.spsRewrite = !s.spsRewrite }, enabled = !media3)
         }
         ButtonRow {
@@ -337,3 +368,13 @@ internal fun stateColor(state: EngineState): Color = when (state) {
 }
 
 internal fun fmt(v: Double): String = String.format(Locale.ROOT, "%.1f", v)
+
+internal fun fmtSeconds(ms: Long): String = fmt(ms / 1000.0)
+
+/** "on", "off", or why it can't be on: most TV decoders don't offer Android's low-latency mode. */
+internal fun lowLatencyText(stats: EngineStats): String = when {
+    stats.lowLatencyDecoding == true -> "on"
+    stats.decoderLowLatencySupported == false -> "not supported by this decoder"
+    stats.lowLatencyDecoding == false -> "off"
+    else -> "–"
+}

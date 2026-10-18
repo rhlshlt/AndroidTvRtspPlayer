@@ -1,6 +1,6 @@
 # Android TV RTSP Player — Implementation Plan
 
-> Exported from the plan's Claude Doc on 2026-10-16 (revision 113). The [live document](https://claude.ai/code/artifact/b64189f7-8fc3-49f6-8f9a-e5f4b7d19196) is the source of truth; diagrams are redrawn here as Mermaid and text.
+> Exported from the plan's Claude Doc on 2026-10-18 (revision 127). The [live document](https://claude.ai/code/artifact/b64189f7-8fc3-49f6-8f9a-e5f4b7d19196) is the source of truth; diagrams are redrawn here as Mermaid and text.
 
 Oct 15, 2026 · @rohit
 
@@ -20,15 +20,15 @@ Build a Kotlin and Jetpack Compose for TV app on Media3 ExoPlayer 1.11.1, where 
 
 ## Phase 0 status
 
-Phase 0's code is written and its RTSP core passes 76 unit tests; the on-device measurements that decide Gate A are next. Everything is on the phase0 branch of the [AndroidTvRtspPlayer repository](https://github.com/rhlshlt/AndroidTvRtspPlayer), with the project documents under `docs/`.
+Phase 0's code is merged into main and builds on GitHub Actions, and its RTSP core passes 76 unit tests; the first TV and camera are measured, and the test-lab capacity test and other Gate A checks are next. Everything is on the main branch of the [AndroidTvRtspPlayer repository](https://github.com/rhlshlt/AndroidTvRtspPlayer), with the project documents under `docs/`.
 
 | Deliverable | Where in the repo | Status |
 | --- | --- | --- |
-| Project setup: Gradle 9.7.1, AGP 9.4.1, Kotlin 2.4.20, five modules, CI | `settings.gradle.kts`, `gradle/`, `.github/workflows/` | Written; first build in Android Studio Quail 4 (2026.1.4) or newer |
+| Project setup: Gradle 9.7.1, AGP 9.4.1, Kotlin 2.4.20, five modules, CI | `settings.gradle.kts`, `gradle/`, `.github/workflows/` | Builds on GitHub Actions: unit tests, debug and perf APKs, camcheck; open it in Android Studio Quail 4 (2026.1.4) or newer |
 | RTSP core: URL parsing, Digest and Basic auth, SDP and SPS parsing, camera check with stream analysis | `core/rtsp` | 76 unit tests pass: RFC 2617/7616 vectors, your C320WS SPS/PPS, real FFmpeg RTP captures |
 | `camcheck` desktop tool: handshake, both engines' auth rules, keyframe interval, B-frames, bitrate, viewer limit | `tools/camcheck` | Run end to end against a scripted camera |
-| Engines behind `StreamEngine`: Media3 with low-latency decoding, rtsp-client-android | `core/player` | Type-checked against the libraries' signatures; needs a TV |
-| TV app: player with metrics and a millisecond clock, 1–16 tile capacity test, camera check, device profile, CSV logs | `app`, `core/perf` | Type-checked; needs a TV |
+| Engines behind `StreamEngine`: Media3 with low-latency decoding, rtsp-client-android | `core/player` | Builds in CI; needs a TV |
+| TV app: player with metrics and a millisecond clock, 1–16 tile capacity test, camera check, device profile, CSV logs | `app`, `core/perf` | Builds in CI; needs a TV |
 | Test lab: MediaMTX with Digest, C320WS-shaped clips, live clock, paths limited to 2 viewers | `testlab` | Clip and publish commands verified with FFmpeg 6.1 |
 
 Found while building:
@@ -38,6 +38,56 @@ Found while building:
 - Media3 gets low-latency decoding through a wrapped codec adapter factory; requirement 7 now says so.
 - Android 17 makes local-network access a runtime permission for apps targeting API 37. The app stays on targetSdk 36, where access is granted implicitly, until that prompt is built.
 - rtsp-client-android ships a class based on Moonlight's `MediaCodecHelper`, and Moonlight is GPL-3.0. That's fine for private installs; review it before any wider distribution.
+
+First camera check, Oct 16 (one C320WS in daylight, `camcheck` from a PC, 60 s per stream):
+
+| Measured | stream1 | stream2 |
+| --- | --- | --- |
+| Sign-in | Digest MD5, realm "TP-Link IP-Camera", no qop; both engines OK | Same |
+| Video | H.264 Main, Level 5.0, 2560 × 1440, 15.0 fps | H.264 Main, Level 2.2, 640 × 360, 15.0 fps |
+| Keyframe interval | 2.00 s, steady | 2.00 s, steady |
+| B-frames | None in 899 frames | None in 900 frames |
+| Video bitrate (day) | 1,481 kbit/s; keyframes about 176 KB | 125 kbit/s; keyframes about 28 KB |
+| First keyframe after PLAY | 62 ms | 55 ms |
+| Largest arrival jitter | 496 ms | 552 ms |
+
+- Both engines can sign in, so decision 1 rests on playback quality alone.
+- With no B-frames, both low-latency options are safe: Media3's low-latency decoding and rtsp-client-android's SPS rewrite.
+- The camera opens each session with a keyframe within about 60 ms, so switching cameras need not wait out the 2 s keyframe interval. Repeated runs and the TV's first-frame times will confirm it.
+- About 0.5 s of arrival jitter on both streams, even at 125 kbit/s, points to Wi-Fi rather than bandwidth. An unbuffered engine may look jerky, while Media3's 0.5 s start buffer should absorb it.
+- The full SDP has an `a=control` line per track and two `sprop-parameter-sets` entries, as Media3 needs. Still to measure: the night bitrate, the viewer limit, and jitter with a wired connection.
+
+First TV, Oct 18: Panasonic 32-inch (model SCBC ATV R1), Android 11, Realtek hardware decoder `OMX.realtek.video.decoder`. One pass per setting with SPS rewrite off; delay read from the camera's on-screen time, which has 1 s resolution:
+
+| Engine | Stream | Decoder | Frame rate | First frame | Behind live |
+| --- | --- | --- | --- | --- | --- |
+| Media3 | stream1 | Android software decoder | 3.9 fps, 2,094 dropped | 3.8 s | About 4–5 s |
+| Media3 | stream2 | Realtek hardware, low latency off | 15.0 fps, 0 dropped | 0.89 s | 1.9–2.9 s (989 ms buffered) |
+| rtsp-client-android | stream1 | Software, after the hardware decoder failed | 14.9 fps | 3.2 s | 1.5–2.5 s (decoder 918 ms) |
+| rtsp-client-android | stream2 | Realtek hardware | 14.9 fps | 0.98 s | 0.5–1.5 s (decoder 589 ms) |
+
+- This TV's hardware decoder can't decode stream1 (2560 × 1440, Level 5.0); both engines fall back to Android's software decoder. Full screen here means stream2, or stream1 decoded in software by rtsp-client-android at a high CPU cost.
+- The Realtek decoder has no low-latency mode, so it holds about 0.5 s of frames because of the missing reorder limit. rtsp-client-android's SPS rewrite should remove that; Media3 has no equivalent yet.
+- rtsp-client-android gave the lowest delay, and Media3 the steadiest playback, with no dropped frames on stream2.
+
+- Left running, Media3 on stream1 fell 1 min 45 s behind live: 97.6 s of video piled up while the software decoder showed 0 fps, and memory kept growing. RTSP gives the camera no signal to slow down, so requirement 7's latency guard must cap the backlog, and devices that can't decode stream1 in hardware must get stream2.
+
+- Device profile: 4 CPU cores, 1.5 GB RAM, a 1280 × 720 panel. The Realtek H.264 decoder goes up to 1920 pixels wide at Level 5.1, runs 2 instances and has no low-latency mode. Provisional tier: LOW.
+- With 2 hardware instances, only 2 tiles decode in hardware; further tiles fall back to the software decoder, rated at about 4 stream2 tiles. The multi-view test measures the real limit.
+- On a 720p panel, stream1's detail can't be shown anyway. A main stream of 1920 pixels wide or less would decode in hardware here.
+- SPS rewrite on: rtsp-client-android's software decoding of stream1 dropped from 918 to 658 ms of decoder delay, at 12.8 fps.
+- Media3 with the Low latency buffer on stream2: 15 fps, no dropped frames, about 1–2 s behind live.
+- Outdoor door, over the internet through a port forward: Media3 on stream2 showed its first frame in 1.2 s, at 15 fps with no dropped frames, 0.8–1.8 s behind live.
+
+SPS rewrite and multi-view on the same TV, Oct 18 (stream2 unless noted):
+
+- rtsp-client-android with SPS rewrite: the Realtek decoder's delay fell from 589 to 259–273 ms, the first frame came in 584 ms, and the picture was under 1 s behind live, the lowest so far. Outdoor door over the internet: first frame 686 ms, decoder 274 ms.
+- 2 tiles with Media3: both on the Realtek decoder at 15 fps each, with no dropped frames in runs of up to 161 s, but only one of the two showed on screen. An evening run started only one of the two tiles; the label bug hid the other tile's error.
+- 4 tiles: 2 Realtek and 2 software decoders, 15 fps each, no dropped frames and no thermal throttling. One Realtek tile stayed black while decoding 15 fps, as in the 2-tile run: this TV shows only one hardware-decoded SurfaceView video at a time. The next build tests TextureView tiles, and a software decoder for every tile but one.
+- Tile labels drawn before the last video disappeared; the next build draws labels after all videos.
+- App CPU covers only the app's own process, as a share of one of the 4 cores; decoding runs in Android's media service. It was about 48% with nothing playing, mostly the clock redrawn every frame, plus about 15% per stream and 10% per extra tile. The total load needs `adb shell top`.
+- Left for 12 minutes, Media3 on stream1 stalled at 0 fps and stored 617 s of video. Its Java heap grew from 10 to 129 MB, about 10 MB a minute, against a 192 MB limit, so the latency guard must restart the player long before memory runs out.
+- The next build accepts camera addresses with a port, reports low-latency decoding truthfully, redraws the clock 10 times a second, adds Media3's latency guard, fixes the multi-view labels, and adds TextureView and software-decoder switches.
 
 To reach Gate A:
 

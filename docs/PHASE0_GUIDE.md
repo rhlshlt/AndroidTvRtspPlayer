@@ -24,22 +24,19 @@ You need:
 - **Git**, and for the test lab **FFmpeg** (`winget install Gyan.FFmpeg`) plus **Docker Desktop** or
   the MediaMTX executable ([TEST_LAB.md](TEST_LAB.md)).
 
-Put the project at `D:\Projects\TvRtspPlayer`:
+Put the project at `D:\Projects\AndroidTvRtspPlayer`:
 
 ```powershell
 cd D:\Projects
-git clone https://github.com/rhlshlt/AndroidTvRtspPlayer.git TvRtspPlayer
+git clone https://github.com/rhlshlt/AndroidTvRtspPlayer.git
 ```
 
-If you received this work as a zip, extract it into `D:\Projects` so that the folder is
-`D:\Projects\TvRtspPlayer` (it contains the `.git` folder, so `git push` works from there).
-
-Open it with **File → Open → D:\Projects\TvRtspPlayer** and let Gradle sync. The wrapper downloads
+Open it with **File → Open → D:\Projects\AndroidTvRtspPlayer** and let Gradle sync. The wrapper downloads
 Gradle 9.7.1 and checks its SHA-256 against the value pinned in
 `gradle/wrapper/gradle-wrapper.properties`. Then, from the project folder:
 
 ```powershell
-.\gradlew.bat :core:rtsp:test           # 76 unit tests, about 10 s
+.\gradlew.bat :core:rtsp:test           # 80 unit tests, about 10 s
 .\gradlew.bat :app:assemblePerf         # app\build\outputs\apk\perf\app-perf.apk
 ```
 
@@ -54,6 +51,20 @@ Build variants (Build → Select Build Variant):
 If sync can't resolve `com.github.alexeyvasilyev:rtsp-client-android:6.1.1`, open
 <https://jitpack.io/#alexeyvasilyev/rtsp-client-android/6.1.1> in a browser so JitPack builds it,
 then sync again.
+
+### Without Android Studio
+
+Every push to `main` builds the APKs on GitHub Actions. Open the repository's **Actions** tab, pick
+the latest successful run on `main`, and download the `tv-rtsp-player-phase0` artifact. Browsers may
+warn about a zip of APKs; keep it, then compare its SHA-256 with the digest GitHub shows next to the
+artifact:
+
+```powershell
+certutil -hashfile $HOME\Downloads\tv-rtsp-player-phase0.zip SHA256
+```
+
+Extract it and install `app\build\outputs\apk\perf\app-perf.apk` from the extracted folder with
+`adb install -r` (step 4).
 
 ## 2. Prepare the cameras
 
@@ -120,6 +131,9 @@ have to recognise as "camera busy".
    adb shell am start -n io.github.rhlshlt.tvrtsp/.MainActivity
    ```
 
+   With the APK from GitHub Actions, use its full path instead of Gradle:
+   `adb install -r D:\Projects\phase0-build\app\build\outputs\apk\perf\app-perf.apk`.
+
 The app appears in the TV's Apps row with the "TV RTSP Player" banner.
 
 ## 5. Add cameras without typing on the TV
@@ -133,6 +147,10 @@ each app start. The helper reads the password without echo and keeps it out of y
 ```
 
 On Linux or macOS: `tools/scripts/add-camera.sh "Front door" 192.168.1.20 tapoview`.
+
+If a camera's RTSP isn't on port 554, add the port to the address, as in
+`-CameraHost 192.168.1.20:8554`. Reach cameras on other sites over a VPN rather than a router port
+forward: RTSP sends the Digest exchange and the video unencrypted.
 
 The test lab's streams (16 identical cameras for the capacity test), and clearing the list:
 
@@ -159,7 +177,9 @@ stream1, 2-view, 4-view, 1 + 7, 16-view) and suggests a tier. It saves `device-p
 ### First-frame time and switching
 
 Home → **Play full screen**. Keys: **Left/Right** switch camera, **Down** switches main/sub,
-**Up** cycles the overlay, **OK** opens the test controls.
+**Up** cycles the overlay (metrics and clock, metrics only, clock only, nothing), **OK** opens the
+test controls. The `overlay` column of the CSV records which one was showing, because the clock
+costs CPU.
 
 For each engine (OK → Engine) and each stream:
 
@@ -180,17 +200,30 @@ keyframe arrives.
 
 ### Glass-to-glass delay
 
-The player shows a clock with milliseconds in the top-right corner.
+The player shows a clock with tenths of a second in the top-right corner, updated 10 times a
+second (redrawing it every frame cost a large share of the app's CPU on the first test TV).
 
 1. Point a camera at the TV so the clock is in view, and play that camera full screen.
 2. Photograph the TV with your phone. The photo shows the live clock and, inside the video, an
    older copy of it. The difference is the delay from camera lens to TV screen.
 3. Take five photos per configuration and keep the median.
 
+Quicker but coarser: compare the clock with the camera's own time stamp in the picture. Both clocks
+use network time, but the time stamp shows whole seconds, so a photo with the clock at 08:16:58.9
+and the time stamp at 08:16:58 means a delay between 0 and 0.9 s.
+
 Configurations: Media3 with Balanced buffering; Media3 with Low latency buffering; Media3 with
 low-latency decoding off; rtsp-client-android; rtsp-client-android with SPS rewrite (only if
-`camcheck` found no B-frames). The plan's target is under 2 s; the comparison between
+`camcheck` found no B-frames). On stream2, also try OK → **Decoder: software first** with each
+engine: Android's software decoder may hold fewer frames than the TV's. The plan's target is under 2 s; the comparison between
 configurations matters more than the absolute value, which includes the camera's own encoder delay.
+
+Media3 has a **latency guard**, on by default (OK → Latency guard). RTSP lets video pile up when the
+decoder falls behind; on the first test TV, Media3 stalled on stream1 and stored 10 minutes of video.
+When more than 3 s (Low latency), 4 s (Balanced) or 8 s (Smooth) stays buffered for 5 s, the guard
+rebuilds the player and rejoins live. While it waits, the overlay shows "Falling behind" in orange;
+the overlay and the `guard_restarts` column count restarts. Turn it off only to measure how far
+behind Media3 falls.
 
 Without a camera pointed at the TV, play the lab's `lab/clock` path instead: it shows the lab PC's
 clock, so the TV's clock minus the video's clock is the delay, accurate to how well both clocks are
@@ -206,12 +239,31 @@ Start the test lab ([TEST_LAB.md](TEST_LAB.md)) and add 16 lab cameras (step 5).
 3. Repeat the largest smooth setting with rtsp-client-android.
 
 The bottom bar shows `playing n/N`, total frames per second (smooth = 15 × tiles) and dropped
-frames. A tile in error usually means the TV ran out of decoder instances. The app's CPU figure
-excludes decoding, which runs in the media service; for the whole device run:
+frames. A tile in error usually means the TV ran out of decoder instances; on a TV with only two
+hardware decoder instances, further tiles quietly switch to Android's software decoder (the
+`decoder` column shows `c2.android.avc.decoder`).
+
+The app's CPU figure counts only the app's own process, as a share of one core (100 = one full core;
+a 4-core TV has 400); decoding runs in Android's media processes. For the whole device, run this
+while the test plays and keep the second of the two samples:
 
 ```powershell
-adb shell top -b -n 1 -m 15
+adb shell top -b -n 2 -d 5 -m 15 > results\top-4tiles.txt
 ```
+
+**Black tiles.** On the first test TV, only one hardware-decoded tile showed at a time, in 2- and
+4-tile grids alike; the others stayed black although their labels said playing at 15 fps. If you see
+that, run the same layout three ways and photograph each:
+
+1. **Video view: SurfaceView**, **Decoders: hardware first**: the baseline.
+2. **Video view: TextureView** (Media3 only): draws video with the GPU inside the app's window, at
+   some CPU and GPU cost, instead of handing it to the display hardware.
+3. **Video view: SurfaceView**, **Decoders: 1 hardware, rest software**: keeps the display hardware
+   for one tile and decodes the others in software (about 13% of a core per stream2 tile).
+
+The `view` and `decoder_preference` columns record which one ran, and the file name ends in
+`_textureview`, `_software` or `_1hardware`. **Clock: off** removes the clock's CPU cost from the
+comparison. Run `adb shell top` (above) during each.
 
 Finish with your real cameras: 2-view and, if you have four, 4-view on stream1.
 
@@ -249,9 +301,13 @@ on your TV, open Home → **Results** to read the files on screen.
 
 Player columns: `first_frame_ms` (from start to first rendered frame), `fps` (rendered, or received
 for rtsp-client-android), `frames_dropped`, `buffered_ms` (Media3), `network_latency_ms` and
-`decoder_latency_ms` (rtsp-client-android), `decoder`, `low_latency_applied`,
-`app_cpu_pct_one_core` (this app only, 100 = one full core), `threads`, heap sizes and `thermal`
-(0 = normal).
+`decoder_latency_ms` (rtsp-client-android), `decoder`, `low_latency_applied` (Android's low-latency
+decoding mode is on), `decoder_low_latency_supported` (the decoder offers that mode at all),
+`app_cpu_pct_one_core` (this app only, 100 = one full core), `threads`, heap sizes, `thermal`
+(0 = normal), `latency_guard` and `guard_restarts` (Media3), and `overlay`.
+
+Multi-view adds `view` (SurfaceView or TextureView), `clock`, `buffered_ms` and `guard_restarts`
+per tile. New columns are added at the end, so older files still line up.
 
 ## 8. Gate A
 
@@ -274,6 +330,8 @@ Record the decisions in [DECISIONS.md](DECISIONS.md) and in the plan, then start
 | `Verification of Gradle distribution failed` | The download doesn't match the pinned SHA-256; compare with <https://gradle.org/release-checksums/> |
 | E-401 in the app but `camcheck` is OK | One engine signs in differently; read the engine lines in `camcheck`'s Authentication section |
 | E-BUSY or E-CLOSED | Too many viewers: close VLC, NVR or Home Assistant streams; Tapo Care uses one slot |
-| Black picture while the state says playing | The decoder may not handle Level 5.0: check the device profile, try stream2 |
+| Black picture while the state says playing | The decoder may not handle stream1's 2560 × 1440 (the first test TV's stops at 1920 wide): check the device profile, try stream2 |
+| One multi-view tile black while its label says playing | The display may not show every hardware-decoded video at once: compare Video view SurfaceView with TextureView |
+| "Falling behind" in orange, then "Rejoining live" | Media3's latency guard: the decoder can't keep up (often stream1 in software); use stream2 or rtsp-client-android |
 | Picture freezes, state stays playing | A stall the Phase 0 player doesn't detect yet; restart and note it for Phase 2 |
 | The app isn't in the Apps row | It installed on another device: `adb devices`, then `-s <device>` |

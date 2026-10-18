@@ -100,6 +100,45 @@ class RtspUrlTest {
     }
 
     @Test
+    fun ofTakesAPortWrittenInTheHost() {
+        // The Phase 0 bug: "203.0.113.5:18554" was bracketed as if it were an IPv6 literal.
+        val url = RtspUrl.of("203.0.113.5:18554", "/stream1", 554, "tapoview", "secret123")
+        assertEquals("rtsp://203.0.113.5:18554/stream1", url.requestUri)
+        assertEquals("203.0.113.5", url.host)
+        assertEquals(18554, url.port)
+        assertFalse(url.isIpv6Literal)
+        assertEquals("rtsp://cam.lan:8554/x", RtspUrl.of(" cam.lan:8554 ", "x").requestUri)
+        assertEquals("rtsp://[2001:db8::5]:8554/x", RtspUrl.of("[2001:db8::5]:8554", "x", 554).requestUri)
+        assertEquals("rtsp://[2001:db8::5]:554/x", RtspUrl.of("[2001:db8::5]", "x", 554).requestUri)
+        assertEquals("rtsp://[fe80::1]:554/x", RtspUrl.of("fe80::1", "x", 554).requestUri)
+        assertEquals("rtsp://10.0.0.9/x", RtspUrl.of("10.0.0.9", "x").requestUri)
+    }
+
+    @Test
+    fun ofRejectsAddressesThatAreNotJustAnAddress() {
+        for (bad in listOf("", "  ", "rtsp://10.0.0.9/stream1", "10.0.0.9/stream1", "user@10.0.0.9", "10.0.0.9:", "10.0.0.9:99999",
+            "10.0.0.9:port", "[fe80::1", "[fe80::1]x", "1.2.3.4:5:6", "cam lan", "fe80::1::2", "12345::", "::g")) {
+            try {
+                RtspUrl.of(bad, "/stream1")
+                fail("Expected an error for \"$bad\"")
+            } catch (_: RtspUrlException) {
+                // expected
+            }
+        }
+    }
+
+    @Test
+    fun validatesIpv6Text() {
+        for (ok in listOf("::", "::1", "1::", "fe80::1", "2001:db8::5", "1:2:3:4:5:6:7:8", "::ffff:192.168.1.20", "fe80::1%25eth0", "FE80::A")) {
+            assertTrue(ok, RtspUrl.isValidIpv6(ok))
+        }
+        for (bad in listOf("1.2.3.4:18554", "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7::8", ":1", "1:", "1::2::3", "12345::1", "::g",
+            "fe80::1%", "::1.2.3", "::256.1.1.1", "1.2.3.4::", "")) {
+            assertFalse(bad, RtspUrl.isValidIpv6(bad))
+        }
+    }
+
+    @Test
     fun keepsQueryStrings() {
         val url = RtspUrl.parse("rtsp://cam/cam/realmonitor?channel=1&subtype=0")
         assertEquals("/cam/realmonitor?channel=1&subtype=0", url.pathAndQuery)

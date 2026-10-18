@@ -24,7 +24,11 @@ object Tapo {
     const val ACCOUNT_MIN_LENGTH = 6
     const val ACCOUNT_MAX_LENGTH = 32
 
-    /** Builds both stream URLs from an IP address or host name and the camera account. */
+    /**
+     * Builds both stream URLs from an IP address or host name and the camera account. The address
+     * may carry a port, such as `203.0.113.5:18554` for a router that forwards to the camera's 554;
+     * that port wins over [port].
+     */
     fun streams(
         host: String,
         username: String? = null,

@@ -1,8 +1,12 @@
 package io.github.rhlshlt.tvrtsp.core.player
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
 import androidx.annotation.OptIn
 import androidx.media3.common.C
@@ -14,6 +18,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,9 +26,19 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Media3 ExoPlayer with its RTSP module. A new player is built on every [start] so that buffer and
  * decoder options apply cleanly; Phase 2 replaces this with pooled players.
+ *
+ * The latency guard (on unless [StreamRequest.latencyGuard] is false) checks once a second how much
+ * video is buffered. RTSP has no back-pressure, so a decoder that can't keep up, or a player stuck
+ * buffering, lets video pile up in memory without limit; past [BufferProfile.guardMs] for
+ * [LATENCY_GUARD_GRACE_MS] (or at three times the limit), the guard rebuilds the player, which drops
+ * the backlog and rejoins live.
  */
 @OptIn(UnstableApi::class)
-class Media3Engine(context: Context, private val name: String) : StreamEngine {
+class Media3Engine(
+    context: Context,
+    private val name: String,
+    private val videoView: VideoView = VideoView.SURFACE_VIEW,
+) : StreamEngine {
     private val appContext = context.applicationContext
     private val _state = MutableStateFlow<EngineState>(EngineState.Idle)
     override val state: StateFlow<EngineState> = _state
@@ -31,6 +46,7 @@ class Media3Engine(context: Context, private val name: String) : StreamEngine {
 
     private var player: ExoPlayer? = null
     private var surfaceView: SurfaceView? = null
+    private var textureView: TextureView? = null
     private var request: StreamRequest? = null
     private var startedAt = 0L
     private var firstFrameMs: Long? = null
@@ -38,18 +54,35 @@ class Media3Engine(context: Context, private val name: String) : StreamEngine {
     private var height = 0
     private var errors = 0
     private var droppedFrames = 0L
+    private val handler = Handler(Looper.getMainLooper())
+    private var guardRestarts = 0
+    private var overLimitSince = 0L
 
     @Volatile private var decoderName: String? = null
 
     @Volatile private var lowLatency: Boolean? = null
 
-    override fun createView(context: Context): View =
-        SurfaceView(context).also { view ->
+    @Volatile private var lowLatencySupported: Boolean? = null
+
+    override fun createView(context: Context): View = when (videoView) {
+        VideoView.SURFACE_VIEW -> SurfaceView(context).also { view ->
             surfaceView = view
             player?.setVideoSurfaceView(view)
         }
+        VideoView.TEXTURE_VIEW -> TextureView(context).also { view ->
+            textureView = view
+            player?.setVideoTextureView(view)
+        }
+    }
 
     override fun start(request: StreamRequest) {
+        guardRestarts = 0
+        launch(request)
+    }
+
+    /** Builds a fresh player for [request]; the latency guard calls this to rejoin live. */
+    private fun launch(request: StreamRequest) {
+        handler.removeCallbacks(guardTick)
         releasePlayer()
         this.request = request
         firstFrameMs = null
@@ -58,11 +91,15 @@ class Media3Engine(context: Context, private val name: String) : StreamEngine {
         droppedFrames = 0
         decoderName = null
         lowLatency = null
+        lowLatencySupported = null
+        overLimitSince = 0L
 
-        val renderers = LowLatencyRenderersFactory(appContext, request.lowLatencyDecoding) { codec, applied ->
+        val renderers = LowLatencyRenderersFactory(appContext, request.lowLatencyDecoding) { codec, supported, applied ->
             decoderName = codec
+            lowLatencySupported = supported
             lowLatency = applied
         }.setEnableDecoderFallback(true)
+            .setMediaCodecSelector(if (request.preferSoftwareDecoder) MediaCodecSelector.PREFER_SOFTWARE else MediaCodecSelector.DEFAULT)
         val profile = request.bufferProfile
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(profile.minBufferMs, profile.maxBufferMs, profile.startMs, profile.afterRebufferMs)
@@ -81,6 +118,7 @@ class Media3Engine(context: Context, private val name: String) : StreamEngine {
                 .build()
         }
         surfaceView?.let { p.setVideoSurfaceView(it) }
+        textureView?.let { p.setVideoTextureView(it) }
         val source = RtspMediaSource.Factory()
             .setForceUseRtpTcp(request.transport == Transport.TCP)
             .setTimeoutMs(request.rtspTimeoutMs)
@@ -92,16 +130,20 @@ class Media3Engine(context: Context, private val name: String) : StreamEngine {
         _state.value = EngineState.Connecting
         p.playWhenReady = true
         p.prepare()
+        if (request.latencyGuard) handler.postDelayed(guardTick, GUARD_INTERVAL_MS)
     }
 
     override fun stop() {
+        handler.removeCallbacks(guardTick)
         releasePlayer()
         _state.value = EngineState.Idle
     }
 
     override fun release() {
+        handler.removeCallbacks(guardTick)
         releasePlayer()
         surfaceView = null
+        textureView = null
         _state.value = EngineState.Idle
     }
 
@@ -123,15 +165,42 @@ class Media3Engine(context: Context, private val name: String) : StreamEngine {
             height = height,
             decoderName = decoderName,
             lowLatencyDecoding = lowLatency,
+            decoderLowLatencySupported = lowLatencySupported,
             framesRendered = counters?.renderedOutputBufferCount?.toLong(),
             framesDropped = counters?.let { (it.droppedBufferCount + it.skippedOutputBufferCount).toLong() } ?: droppedFrames,
             bufferedMs = player?.totalBufferedDuration,
             firstFrameMs = firstFrameMs,
             errors = errors,
+            guardLimitMs = request?.takeIf { it.latencyGuard }?.bufferProfile?.guardMs,
+            guardRestarts = guardRestarts,
         )
     }
 
     private fun sinceStart(): Long = SystemClock.elapsedRealtime() - startedAt
+
+    private val guardTick = object : Runnable {
+        override fun run() {
+            val p = player ?: return
+            val req = request ?: return
+            val buffered = p.totalBufferedDuration
+            val limit = req.bufferProfile.guardMs
+            val now = SystemClock.elapsedRealtime()
+            val failed = _state.value.let { it is EngineState.Error || it == EngineState.Ended }
+            if (failed || buffered <= limit) {
+                // Errors and ended streams stay visible: recovering from them is Phase 2's reconnect.
+                overLimitSince = 0L
+            } else {
+                if (overLimitSince == 0L) overLimitSince = now
+                if (now - overLimitSince >= LATENCY_GUARD_GRACE_MS || buffered >= 3 * limit) {
+                    guardRestarts++
+                    Log.w(TAG, "$name: $buffered ms buffered, over the $limit ms limit; restarting (guard restart $guardRestarts)")
+                    launch(req) // posts the next check itself
+                    return
+                }
+            }
+            handler.postDelayed(this, GUARD_INTERVAL_MS)
+        }
+    }
 
     private val listener = object : Player.Listener {
         override fun onRenderedFirstFrame() {
@@ -178,5 +247,10 @@ class Media3Engine(context: Context, private val name: String) : StreamEngine {
         ) {
             this@Media3Engine.decoderName = decoderName
         }
+    }
+
+    private companion object {
+        const val TAG = "Media3Engine"
+        const val GUARD_INTERVAL_MS = 1_000L
     }
 }

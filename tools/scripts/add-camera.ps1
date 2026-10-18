@@ -4,6 +4,7 @@
 #
 # Usage:  .\tools\scripts\add-camera.ps1 -Name "Front door" -CameraHost 192.168.1.20 -User tapoview
 #         [-Telephoto] [-Device 192.168.1.50:5555]
+# -CameraHost is an IP address or host name; add :port when RTSP isn't on 554 (192.168.1.20:8554).
 param(
     [Parameter(Mandatory = $true)] [string]$Name,
     [Parameter(Mandatory = $true)] [string]$CameraHost,

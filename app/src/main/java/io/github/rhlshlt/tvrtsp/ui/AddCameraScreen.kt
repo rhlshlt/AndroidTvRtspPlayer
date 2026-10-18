@@ -71,7 +71,10 @@ fun AddCameraScreen(back: () -> Unit) {
         LazyColumn(Modifier.widthIn(max = 900.dp).fillMaxWidth()) {
             item { Section("Tapo camera (C320WS)") }
             item { TvTextField("Name", tapoName, { tapoName = it }, Modifier.focusRequester(first), hint = "For example Front door") }
-            item { TvTextField("IP address", tapoHost, { tapoHost = it }, keyboardType = KeyboardType.Uri, hint = "Reserve it in your router so it doesn't change") }
+            item {
+                TvTextField("IP address", tapoHost, { tapoHost = it }, keyboardType = KeyboardType.Uri,
+                    hint = "For example 192.168.1.20, or 192.168.1.20:8554 when RTSP isn't on port 554. Reserve it in your router so it doesn't change")
+            }
             item { TvTextField("Camera Account user name", tapoUser, { tapoUser = it }, hint = "Tapo app → camera → Device Settings → Advanced Settings → Camera Account") }
             item { TvTextField("Camera Account password", tapoPass, { tapoPass = it }, password = true) }
             item {
